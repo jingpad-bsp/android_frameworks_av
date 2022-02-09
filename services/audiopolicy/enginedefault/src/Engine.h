@@ -60,7 +60,8 @@ private:
 
     DeviceVector getOutputDevicesForAttributes(const audio_attributes_t &attr,
                                                const sp<DeviceDescriptor> &preferedDevice = nullptr,
-                                               bool fromCache = false) const override;
+                                               bool fromCache = false,
+                                               bool ignoreFM = false) const override;
 
     DeviceVector getOutputDevicesForStream(audio_stream_type_t stream,
                                            bool fromCache = false) const override;
@@ -83,7 +84,7 @@ private:
                                             const SwAudioOutputCollection &outputs,
                                             uint32_t outputDeviceTypesToIgnore) const;
 
-    DeviceVector getDevicesForProductStrategy(product_strategy_t strategy) const;
+    DeviceVector getDevicesForProductStrategy(product_strategy_t strategy, bool ignoreFM = false) const;
 
     audio_devices_t getDeviceForInputSource(audio_source_t inputSource) const;
 

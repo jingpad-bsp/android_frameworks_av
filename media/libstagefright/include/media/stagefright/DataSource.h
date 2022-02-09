@@ -57,6 +57,8 @@ public:
         return NULL;
     }
 
+    virtual void getDrmInfo(sp<DecryptHandle> &/*handle*/, DrmManagerClient ** /*client*/) {};
+
     virtual String8 getUri() {
         return String8();
     }

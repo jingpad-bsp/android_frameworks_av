@@ -109,7 +109,9 @@ public:
 
     void dump() const;
     status_t dump(int fd, const Vector<String16>& args) const;
-
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "CameraParameters2Ex.h"
+#endif
 private:
 
     // Quick and dirty map that maintains insertion order

@@ -690,6 +690,8 @@ public:
      */
     static int previewFormatToEnum(const char* format);
 
+#include "cameraEx/CameraParametersEx.h"
+
 private:
     DefaultKeyedVector<String8,String8>    mMap;
 };

@@ -68,6 +68,29 @@ String16 OutputConfiguration::getPhysicalCameraId() const {
     return mPhysicalCameraId;
 }
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+bool OutputConfiguration::isSprd() const {
+    return mIsSprd;
+}
+
+bool OutputConfiguration::isEIS() const {
+    return mIsEIS;
+}
+#endif
+
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+OutputConfiguration::OutputConfiguration() :
+          mRotation(INVALID_ROTATION),
+          mSurfaceSetID(INVALID_SET_ID),
+          mSurfaceType(SURFACE_TYPE_UNKNOWN),
+          mWidth(0),
+          mHeight(0),
+          mIsDeferred(false),
+          mIsShared(false),
+          mIsSprd(false),
+          mIsEIS(false){
+}
+#else
 OutputConfiguration::OutputConfiguration() :
         mRotation(INVALID_ROTATION),
         mSurfaceSetID(INVALID_SET_ID),
@@ -77,6 +100,7 @@ OutputConfiguration::OutputConfiguration() :
         mIsDeferred(false),
         mIsShared(false) {
 }
+#endif
 
 OutputConfiguration::OutputConfiguration(const android::Parcel& parcel) :
         mRotation(INVALID_ROTATION),
@@ -145,6 +169,19 @@ status_t OutputConfiguration::readFromParcel(const android::Parcel* parcel) {
 
     parcel->readString16(&mPhysicalCameraId);
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    int isSprd = 0;
+    int isEIS = 0;
+    if ((err = parcel->readInt32(&isSprd)) != OK) {
+        ALOGE("%s: Failed to read surface isSprd flag from parcel", __FUNCTION__);
+    }
+    mIsSprd = isSprd != 0;
+    if ((err = parcel->readInt32(&isEIS)) != OK) {
+        ALOGE("%s: Failed to read surface isEIS flag from parcel", __FUNCTION__);
+    }
+    mIsEIS = isEIS != 0;
+#endif
+
     mRotation = rotation;
     mSurfaceSetID = setID;
     mSurfaceType = surfaceType;
@@ -175,6 +212,10 @@ OutputConfiguration::OutputConfiguration(sp<IGraphicBufferProducer>& gbp, int ro
     mIsDeferred = false;
     mIsShared = isShared;
     mPhysicalCameraId = physicalId;
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    mIsSprd = false;
+    mIsEIS = false;
+#endif
 }
 
 OutputConfiguration::OutputConfiguration(
@@ -223,6 +264,13 @@ status_t OutputConfiguration::writeToParcel(android::Parcel* parcel) const {
 
     err = parcel->writeString16(mPhysicalCameraId);
     if (err != OK) return err;
+
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    err = parcel->writeInt32(mIsSprd ? 1 : 0);
+    if (err != OK) return err;
+    err = parcel->writeInt32(mIsEIS ? 1 : 0);
+    if (err != OK) return err;
+#endif
 
     return OK;
 }

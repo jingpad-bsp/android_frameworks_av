@@ -47,6 +47,10 @@ public:
     bool                       isDeferred() const;
     bool                       isShared() const;
     String16                   getPhysicalCameraId() const;
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    bool                       isSprd() const;
+    bool                       isEIS() const;
+#endif
     /**
      * Keep impl up-to-date with OutputConfiguration.java in frameworks/base
      */
@@ -133,6 +137,10 @@ private:
     bool                       mIsDeferred;
     bool                       mIsShared;
     String16                   mPhysicalCameraId;
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    bool                       mIsSprd;
+    bool                       mIsEIS;
+#endif
 };
 } // namespace params
 } // namespace camera2

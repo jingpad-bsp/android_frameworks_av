@@ -100,6 +100,7 @@ struct NuPlayer : public AHandler {
     const char *getDataSourceType();
 
     void updateInternalTimers();
+    void setNeedConsume(bool needConsume);
 
 protected:
     virtual ~NuPlayer();

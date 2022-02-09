@@ -25,6 +25,11 @@
 
 #include <OMX_Video.h>
 
+#define STATIC_MATRIX_FOR_DITHER
+//#define DUMP_RGB565
+static uint32_t BayerMatrix[16] = {0,4,0,5,6,2,7,3,1,5,1,4,8,3,6,2};
+static uint32_t BayerMatrix2[4] = {0,2,3,1};
+
 namespace android {
 
 struct ColorConverter {
@@ -106,6 +111,9 @@ private:
             const BitmapParams &src, const BitmapParams &dst);
 
     status_t convertYUV420SemiPlanar(
+            const BitmapParams &src, const BitmapParams &dst);
+
+    status_t convertYUV420SemiPlanarWithDithering(
             const BitmapParams &src, const BitmapParams &dst);
 
     status_t convertTIYUV420PackedSemiPlanar(

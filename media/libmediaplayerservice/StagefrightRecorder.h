@@ -133,6 +133,7 @@ private:
     int64_t mStartedRecordingUs;
     int64_t mDurationPausedUs;
     int32_t mNPauses;
+    bool mVideoStabilizationEnable;
 
     bool mCaptureFpsEnable;
     double mCaptureFps;
@@ -165,11 +166,14 @@ private:
     float mSelectedMicFieldDimension;
 
     static const int kMaxHighSpeedFps = 1000;
+    bool mIsFromCamera;
+    String8 good_old_string(const String16& src);
 
     status_t prepareInternal();
     status_t setupMPEG4orWEBMRecording();
     void setupMPEG4orWEBMMetaData(sp<MetaData> *meta);
     status_t setupAMRRecording();
+    status_t setupMP3Recording();
     status_t setupAACRecording();
     status_t setupOggRecording();
     status_t setupRawAudioRecording();
@@ -218,6 +222,7 @@ private:
     void clipNumberOfAudioChannels();
     void setDefaultProfileIfNecessary();
     void setDefaultVideoEncoderIfNecessary();
+    status_t setParamVideoStabilizationEnable(int32_t VideoStabilizationEnable);
 
 
     StagefrightRecorder(const StagefrightRecorder &);

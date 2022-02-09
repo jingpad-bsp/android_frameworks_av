@@ -61,7 +61,11 @@ public:
         mMemory = nullptr;
     }
     virtual uint32_t getFlags() {
-        return mSource->flags();
+        if (mSource.get() != nullptr) {
+            return mSource->flags();
+        } else {
+            return 0;
+        }
     }
     virtual String8 toString()  {
         return mName;

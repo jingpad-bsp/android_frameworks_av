@@ -67,6 +67,7 @@ Engine::Engine() : mPolicyParameterMgr(new ParameterManagerWrapper())
     if (loadResult < 0) {
         ALOGE("Policy Engine configuration is invalid.");
     }
+    setIsUseAudioWhaleHal(property_get_bool("ro.audio.whale_hal", false));
 }
 
 Engine::~Engine()
@@ -165,6 +166,38 @@ status_t Engine::setDeviceConnectionState(const sp<DeviceDescriptor> devDesc,
     mPolicyParameterMgr->setDeviceConnectionState(devDesc, state);
 
     if (audio_is_output_device(devDesc->type())) {
+
+        if (isUseAudioWhaleHal()) {
+            if(AUDIO_DEVICE_OUT_ALL_USB&devDesc->type()){
+                audio_devices_t usbtype = getApmObserver()->getAvailableOutputDevices().types();
+                audio_devices_t currentype = devDesc->type();
+
+                bool isUsbSuuprtOffload=false;
+
+                if(AUDIO_DEVICE_OUT_ALL_USB&currentype){
+                    //usb out device connect
+                    if(AUDIO_DEVICE_OUT_USB_DEVICE&currentype){
+                        if (true==devDesc->issupportusboffload()) {
+                            isUsbSuuprtOffload =true;
+                        }
+                    }
+
+                    if(AUDIO_DEVICE_OUT_USB_HEADSET&currentype){
+                        if (true==devDesc->issupportusboffload()) {
+                            isUsbSuuprtOffload =true;
+                        }
+                    }
+                }
+                ALOGI("setSprdUsbMode:%d usbtype:0x%x currentype:0x%x name:%s",
+                    isUsbSuuprtOffload,usbtype,currentype,devDesc->getTagName().string());
+                if(true==isUsbSuuprtOffload){
+                    mPolicyParameterMgr->setSprdUsbMode(1);
+                }else{
+                    mPolicyParameterMgr->setSprdUsbMode(0);
+                }
+            }
+        }
+
         return mPolicyParameterMgr->setAvailableOutputDevices(
                     getApmObserver()->getAvailableOutputDevices().types());
     } else if (audio_is_input_device(devDesc->type())) {
@@ -200,7 +233,7 @@ status_t Engine::loadAudioPolicyEngineConfig()
     return result.nbSkippedElement == 0? NO_ERROR : BAD_VALUE;
 }
 
-DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps) const
+DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps, bool ignoreFM) const
 {
     const auto productStrategies = getProductStrategies();
     if (productStrategies.find(ps) == productStrategies.end()) {
@@ -225,12 +258,23 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps) const
     if (ps == getProductStrategyForStream(AUDIO_STREAM_NOTIFICATION) &&
             !is_state_in_call(getPhoneState()) &&
             !outputs.isActiveRemotely(toVolumeSource(AUDIO_STREAM_MUSIC),
-                                      SONIFICATION_RESPECTFUL_AFTER_MUSIC_DELAY) &&
-            outputs.isActive(toVolumeSource(AUDIO_STREAM_MUSIC),
+                                      SONIFICATION_RESPECTFUL_AFTER_MUSIC_DELAY)) {
+            if(outputs.isActive(toVolumeSource(AUDIO_STREAM_MUSIC),
                              SONIFICATION_RESPECTFUL_AFTER_MUSIC_DELAY)) {
-        product_strategy_t strategyForMedia =
-                getProductStrategyForStream(AUDIO_STREAM_MUSIC);
-        devices = productStrategies.getDeviceTypesForProductStrategy(strategyForMedia);
+                product_strategy_t strategyForMedia =
+                        getProductStrategyForStream(AUDIO_STREAM_MUSIC);
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+                if(outputs.isActive(toVolumeSource(AUDIO_STREAM_FM))) {
+                    strategyForMedia =
+                        getProductStrategyForStream(AUDIO_STREAM_FM);
+                }
+#endif
+                devices = productStrategies.getDeviceTypesForProductStrategy(strategyForMedia);
+            } else {
+                product_strategy_t strategyForNofification =
+                        getProductStrategyForStream(AUDIO_STREAM_NOTIFICATION);
+                devices = productStrategies.getDeviceTypesForProductStrategy(strategyForNofification);
+            }
     } else if (ps == getProductStrategyForStream(AUDIO_STREAM_ACCESSIBILITY) &&
         (outputs.isActive(toVolumeSource(AUDIO_STREAM_RING)) ||
          outputs.isActive(toVolumeSource(AUDIO_STREAM_ALARM)))) {
@@ -240,14 +284,51 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps) const
         product_strategy_t strategyNotification = getProductStrategyForStream(AUDIO_STREAM_RING);
         devices = productStrategies.getDeviceTypesForProductStrategy(strategyNotification);
     } else {
-        devices = productStrategies.getDeviceTypesForProductStrategy(ps);
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+        if((!is_state_in_call(getPhoneState()))&&((ps==getProductStrategyForStream(AUDIO_STREAM_MUSIC))
+            ||(ps==getProductStrategyForStream(AUDIO_STREAM_DTMF)))
+            &&outputs.isActive(toVolumeSource(AUDIO_STREAM_FM)) && !ignoreFM) {
+            devices = productStrategies.getDeviceTypesForProductStrategy(getProductStrategyForStream(AUDIO_STREAM_FM));
+
+        }
+        else
+#endif
+        {
+            devices = productStrategies.getDeviceTypesForProductStrategy(ps);
+        }
     }
     if (devices == AUDIO_DEVICE_NONE ||
             (devices & availableOutputDevicesType) == AUDIO_DEVICE_NONE) {
-        devices = getApmObserver()->getDefaultOutputDevice()->type();
-        ALOGE_IF(devices == AUDIO_DEVICE_NONE, "%s: no valid default device defined", __FUNCTION__);
-        return DeviceVector(getApmObserver()->getDefaultOutputDevice());
+
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+        if((!is_state_in_call(getPhoneState()))&&((ps==getProductStrategyForStream(AUDIO_STREAM_MUSIC))
+            ||(ps==getProductStrategyForStream(AUDIO_STREAM_DTMF)))
+            && outputs.isActive(toVolumeSource(AUDIO_STREAM_FM)) && !ignoreFM){
+                devices=productStrategies.getDeviceTypesForProductStrategy(getProductStrategyForStream(AUDIO_STREAM_FM));
+        }else
+#endif
+        {
+            devices = getApmObserver()->getDefaultOutputDevice()->type();
+            ALOGE_IF(devices == AUDIO_DEVICE_NONE, "%s: no valid default device defined", __FUNCTION__);
+            return DeviceVector(getApmObserver()->getDefaultOutputDevice());
+        }
     }
+
+    if (isUseAudioWhaleHal()) {
+        //modify for direct output voip
+        if (outputs.isActiveRemotely(toVolumeSource(AUDIO_STREAM_VOICE_CALL))){
+            devices = productStrategies.getDeviceTypesForProductStrategy(getProductStrategyForStream(AUDIO_STREAM_VOICE_CALL));
+            return availableOutputDevices.getDevicesFromTypeMask(devices);
+        }
+    }
+
+    //add for bug#894798
+    if(is_state_in_call(getPhoneState()) && ((ps==getProductStrategyForStream(AUDIO_STREAM_MUSIC))
+        ||(ps==getProductStrategyForStream(AUDIO_STREAM_ENFORCED_AUDIBLE)))){
+        devices=productStrategies.getDeviceTypesForProductStrategy(getProductStrategyForStream(AUDIO_STREAM_VOICE_CALL));
+        return availableOutputDevices.getDevicesFromTypeMask(devices);
+    }
+
     if (/*device_distinguishes_on_address(devices)*/ devices == AUDIO_DEVICE_OUT_BUS) {
         // We do expect only one device for these types of devices
         // Criterion device address garantee this one is available
@@ -258,13 +339,23 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t ps) const
                                                              address,
                                                              AUDIO_FORMAT_DEFAULT));
     }
+
+    if ((ps==getProductStrategyForStream(AUDIO_STREAM_MUSIC)) && (!is_state_in_call(getPhoneState()))) {
+        if (availableOutputDevices.getDevice(AUDIO_DEVICE_OUT_REMOTE_SUBMIX,
+                                             String8("0"),AUDIO_FORMAT_DEFAULT) != 0) {
+            devices = availableOutputDevicesType &  AUDIO_DEVICE_OUT_REMOTE_SUBMIX;
+            ALOGV("%s:device 0x%x %d", __FUNCTION__, devices, ps);
+            return availableOutputDevices.getDevicesFromTypeMask(devices);
+        }
+    }
+
     ALOGV("%s:device 0x%x %d", __FUNCTION__, devices, ps);
     return availableOutputDevices.getDevicesFromTypeMask(devices);
 }
 
 DeviceVector Engine::getOutputDevicesForAttributes(const audio_attributes_t &attributes,
                                                    const sp<DeviceDescriptor> &preferredDevice,
-                                                   bool fromCache) const
+                                                   bool fromCache, bool ignoreFM) const
 {
     // First check for explict routing device
     if (preferredDevice != nullptr) {
@@ -285,7 +376,7 @@ DeviceVector Engine::getOutputDevicesForAttributes(const audio_attributes_t &att
         return DeviceVector(device);
     }
 
-    return fromCache? mDevicesForStrategies.at(strategy) : getDevicesForProductStrategy(strategy);
+    return fromCache? mDevicesForStrategies.at(strategy) : getDevicesForProductStrategy(strategy,ignoreFM);
 }
 
 DeviceVector Engine::getOutputDevicesForStream(audio_stream_type_t stream, bool fromCache) const

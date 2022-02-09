@@ -34,6 +34,10 @@
 #include "api1/client2/CallbackProcessor.h"
 #include "api1/client2/ZslProcessor.h"
 #include "utils/CameraThreadState.h"
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "api1/Camera2ClientEx.h"
+#include "api1/client2/ParametersExFun.h"
+#endif
 
 #define ALOG1(...) ALOGD_IF(gLogLevel >= 1, __VA_ARGS__);
 #define ALOG2(...) ALOGD_IF(gLogLevel >= 2, __VA_ARGS__);
@@ -65,6 +69,14 @@ Camera2Client::Camera2Client(const sp<CameraService>& cameraService,
 
     SharedParameters::Lock l(mParameters);
     l.mParameters.state = Parameters::DISCONNECTED;
+
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    String8 clientPackageName8(clientPackageName);
+    if(!strcmp(clientPackageName8,"com.tencent.mm")){
+        l.mParameters.topAppId = TOP_APP_WECHAT;
+    }
+#endif
+
 }
 
 status_t Camera2Client::initialize(sp<CameraProviderManager> manager, const String8& monitorTags) {
@@ -1090,7 +1102,11 @@ status_t Camera2Client::startRecordingL(Parameters &params, bool restart) {
     }
 
     if (!restart) {
+#ifndef SPRD_FRAMEWORKS_CAMERA_EX
         sCameraService->playSound(CameraService::SOUND_RECORDING_START);
+#else
+        playSound(params,sCameraService,true);
+#endif
         mStreamingProcessor->updateRecordingRequest(params);
         if (res != OK) {
             ALOGE("%s: Camera %d: Unable to update recording request: %s (%d)",
@@ -1247,8 +1263,11 @@ void Camera2Client::stopRecording() {
             return;
     };
 
+#ifndef SPRD_FRAMEWORKS_CAMERA_EX
     sCameraService->playSound(CameraService::SOUND_RECORDING_STOP);
-
+#else
+    playSound(l.mParameters,sCameraService,false);
+#endif
     // Remove recording stream because the video target may be abandoned soon.
     res = stopStream();
     if (res != OK) {
@@ -1675,7 +1694,12 @@ status_t Camera2Client::commandEnableShutterSoundL(bool enable) {
 }
 
 status_t Camera2Client::commandPlayRecordingSoundL() {
+#ifndef SPRD_FRAMEWORKS_CAMERA_EX
     sCameraService->playSound(CameraService::SOUND_RECORDING_START);
+#else
+    SharedParameters::Lock l(mParameters);
+    playSound(l.mParameters,sCameraService,true);
+#endif
     return OK;
 }
 
@@ -2256,4 +2280,14 @@ status_t Camera2Client::setVideoTarget(const sp<IGraphicBufferProducer>& bufferP
 const char* Camera2Client::kAutofocusLabel = "autofocus";
 const char* Camera2Client::kTakepictureLabel = "take_picture";
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+status_t Camera2Client::updateIsTakePictureWithFlashParamToAppEx(int value) {
+    status_t res = OK;
+
+    SharedParameters::Lock l(mParameters);
+    updateIsTakePictureWithFlashToAppEx(&l.mParameters , value);
+
+    return res;
+}
+#endif
 } // namespace android

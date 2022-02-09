@@ -75,6 +75,16 @@ void AudioPolicyService::onFirstRef()
 
         mAudioPolicyClient = new AudioPolicyClient(this);
         mAudioPolicyManager = createAudioPolicyManager(mAudioPolicyClient);
+
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+        char value[PROPERTY_VALUE_MAX];
+        int forced_val;
+        /*SPRD for new policy, set the camera forced sound*/
+        property_get("ro.camera.sound.forced", value, "1");
+        forced_val = strtol(value, NULL, 0);
+        ALOGV("ro.camera.sound.forced !forced_val=%d ",!forced_val);
+        mAudioPolicyManager->setSystemProperty("ro.camera.sound.forced", !forced_val ? "0" : "1");
+#endif
     }
     // load audio processing modules
     sp<AudioPolicyEffects>audioPolicyEffects = new AudioPolicyEffects();
@@ -83,12 +93,53 @@ void AudioPolicyService::onFirstRef()
         mAudioPolicyEffects = audioPolicyEffects;
     }
 
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+    pthread_t uidpolicy;
+    if (pthread_create(&uidpolicy, nullptr, UidPolicyThreadWrapper, this) != 0) {
+        ALOGW("Failed to create thread for uid policy register.");
+    }
+    ALOGW("create thread for uid policy register.");
+
+    pthread_t sensorPrivacyPolicy;
+    if (pthread_create(&sensorPrivacyPolicy, nullptr, SensorPrivacyPolicyThreadWrapper, this) != 0) {
+        ALOGW("Failed to create thread for sensor privacy policy register.");
+    }
+    ALOGW("create thread for sensor privacy policy register.");
+
+#else
     mUidPolicy = new UidPolicy(this);
     mUidPolicy->registerSelf();
 
     mSensorPrivacyPolicy = new SensorPrivacyPolicy(this);
     mSensorPrivacyPolicy->registerSelf();
+#endif
 }
+
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+void *AudioPolicyService::UidPolicyThreadWrapper(void *me) {
+    static_cast<AudioPolicyService *>(me)->UidThreadFunc();
+    return nullptr;
+}
+
+void AudioPolicyService::UidThreadFunc() {
+    mUidPolicy = new UidPolicy(this);
+    mUidPolicy->registerSelf();
+
+    ALOGW("ThreadFunc for uid policy register.");
+}
+
+void *AudioPolicyService::SensorPrivacyPolicyThreadWrapper(void *me) {
+    static_cast<AudioPolicyService *>(me)->SensorPrivacyThreadFunc();
+    return nullptr;
+}
+
+void AudioPolicyService::SensorPrivacyThreadFunc() {
+    mSensorPrivacyPolicy = new SensorPrivacyPolicy(this);
+    mSensorPrivacyPolicy->registerSelf();
+
+    ALOGW("ThreadFunc for sensor privacy policy register.");
+}
+#endif
 
 AudioPolicyService::~AudioPolicyService()
 {
@@ -1397,6 +1448,12 @@ status_t AudioPolicyService::AudioCommandThread::createAudioPatchCommand(
     command->mParam = data;
     command->mWaitStatus = true;
     ALOGV("AudioCommandThread() adding create patch delay %d", delayMs);
+    if(delayMs &&  (*handle != AUDIO_PATCH_HANDLE_NONE)){
+        command->mWaitStatus = false;
+    }else{
+        command->mWaitStatus = true;
+    }
+
     status = sendCommand(command, delayMs);
     if (status == NO_ERROR) {
         *handle = data->mHandle;
@@ -1550,6 +1607,7 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
         case SET_PARAMETERS: {
             ParametersData *data = (ParametersData *)command->mParam.get();
             ParametersData *data2 = (ParametersData *)command2->mParam.get();
+            bool is_usboffloadtest=false;
             if (data->mIO != data2->mIO) break;
             ALOGV("Comparing parameter command %s to new command %s",
                     data2->mKeyValuePairs.string(), data->mKeyValuePairs.string());
@@ -1558,7 +1616,11 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
             for (size_t j = 0; j < param.size(); j++) {
                 String8 key;
                 String8 value;
+                String8 usboffloadtest=String8("usboffloadtest");
                 param.getAt(j, key, value);
+                if (key == usboffloadtest){
+                    is_usboffloadtest=true;
+                }
                 for (size_t k = 0; k < param2.size(); k++) {
                     String8 key2;
                     String8 value2;
@@ -1580,7 +1642,11 @@ void AudioPolicyService::AudioCommandThread::insertCommand_l(sp<AudioCommand>& c
             command->mTime = command2->mTime;
             // force delayMs to non 0 so that code below does not request to wait for
             // command status as the command is now delayed
-            delayMs = 1;
+            if((is_usboffloadtest==true)&&(0==delayMs)){
+                ALOGI("%s line:%d usboffloadtest sync",__func__,__LINE__);
+            }else{
+                delayMs = 1;
+            }
         } break;
 
         case SET_VOLUME: {

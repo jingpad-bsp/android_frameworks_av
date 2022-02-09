@@ -132,6 +132,18 @@ public:
     status_t addCriterion(const std::string &name, bool isInclusive, ValuePairs pairs,
                           const std::string &defaultValue);
 
+    /**
+     * Set Offload Mode.
+     * It will set the Offload mode criterion accordingly and apply the configuration in order
+     * to select the right configuration on domains depending on this mode criterion.
+     *
+     * @param[in] mode: Sprd Offload state (normal, SprdUsboffload, SprdA2DPoffload)
+     *
+     * @return NO_ERROR if criterion set correctly, error code otherwise.
+     */
+
+    status_t setSprdUsbMode(int mode);
+
 private:
     /**
      * Apply the configuration of the platform on the policy parameter manager.

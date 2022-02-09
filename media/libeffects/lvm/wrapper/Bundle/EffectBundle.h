@@ -78,6 +78,8 @@ struct BundledEffectContext{
     int                             NumberEffectsEnabled;     /* Effects in this session */
     int                             NumberEffectsCalled;      /* Effects called so far */
     bool                            firstVolume;              /* No smoothing on first Vol change */
+    bool                            bFirstVolumeSetting;      /* No smoothing on first Vol change */
+    bool                            bProcessStarted;          /* No smoothing on first Vol change */
     // Saved parameters for each effect */
     // Bass Boost
     int                             BassStrengthSaved;        /* Conversion between Get/Set */

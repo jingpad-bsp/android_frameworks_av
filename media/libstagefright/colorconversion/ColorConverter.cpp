@@ -46,6 +46,40 @@
 #include <arm_neon.h>
 #endif
 
+uint32_t dith8to6(uint32_t input, uint32_t thr)
+{
+    uint32_t high_var;
+    uint32_t low_var;
+
+    high_var = (input & 0xFC); // 6 bit
+    low_var = input - high_var;
+    high_var = high_var >> 2;
+
+    if ((low_var > thr) && (high_var < 63))
+    {
+        high_var = high_var + 1;
+    }
+
+    return (high_var << 2);
+}
+
+uint32_t dith8to5(uint32_t input, uint32_t thr)
+{
+    uint32_t high_var;
+    uint32_t low_var;
+
+    high_var = input & 0xF8; // 5 bit
+    low_var = input - high_var;
+    high_var = high_var >> 3;
+
+    if ((low_var > thr) && (high_var < 31))
+    {
+        high_var = high_var + 1;
+    }
+
+    return (high_var << 3);
+}
+
 namespace android {
 
 static bool isRGB(OMX_COLOR_FORMATTYPE colorFormat) {
@@ -245,7 +279,10 @@ status_t ColorConverter::convert(
 
         case OMX_COLOR_FormatYUV420SemiPlanar:
 #ifdef USE_LIBYUV
-            err = convertYUV420SemiPlanarUseLibYUV(src, dst);
+            if (mDstFormat == OMX_COLOR_Format32BitRGBA8888)
+                err = convertYUV420SemiPlanarUseLibYUV(src, dst);
+            else
+                err = convertYUV420SemiPlanarWithDithering(src, dst);
 #else
             err = convertYUV420SemiPlanar(src, dst);
 #endif
@@ -949,6 +986,120 @@ status_t ColorConverter::convertYUV420SemiPlanar(
 
         dst_ptr = (uint16_t*)((uint8_t*)dst_ptr + dst.mStride);
     }
+
+    return OK;
+}
+
+status_t ColorConverter::convertYUV420SemiPlanarWithDithering(
+    const BitmapParams &src, const BitmapParams &dst) {
+    // XXX Untested
+
+    uint8_t *kAdjustedClip = initClip();
+
+    if (!((src.mCropLeft & 1) == 0
+            && src.cropWidth() == dst.cropWidth()
+            && src.cropHeight() == dst.cropHeight())) {
+        return ERROR_UNSUPPORTED;
+    }
+
+    uint16_t *dst_ptr = (uint16_t *)dst.mBits
+                        + dst.mCropTop * dst.mWidth + dst.mCropLeft;
+
+    const uint8_t *src_y =
+        (const uint8_t *)src.mBits + src.mCropTop * src.mWidth + src.mCropLeft;
+
+    const uint8_t *src_u =
+        (const uint8_t *)src_y + src.mWidth * src.mHeight
+        + src.mCropTop * src.mWidth + src.mCropLeft;
+
+    uint32_t ii, ig, jj, thr_rb, thr_g;
+    uint32_t matrix_bak[16];
+
+    for (size_t y = 0; y < src.cropHeight(); ++y) {
+        ii = y % 4;
+        ig = y % 2;
+
+#ifndef STATIC_MATRIX_FOR_DITHER
+        memcpy(matrix_bak, BayerMatrix, 16*sizeof(uint32_t));
+#endif
+        for (size_t x = 0; x < src.cropWidth(); x += 2) {
+            signed y1 = (signed)src_y[x] - 16;
+            signed y2 = (signed)src_y[x + 1] - 16;
+
+            //the input yuv420sp should be NV12
+            signed u = (signed)src_u[x & ~1] - 128;
+            signed v = (signed)src_u[(x & ~1) + 1] - 128;
+
+            signed u_b = u * 517;
+            signed u_g = -u * 100;
+            signed v_g = -v * 208;
+            signed v_r = v * 409;
+
+            signed tmp1 = y1 * 298;
+            signed b1 = (tmp1 + u_b) / 256;
+            signed g1 = (tmp1 + v_g + u_g) / 256;
+            signed r1 = (tmp1 + v_r) / 256;
+
+            signed tmp2 = y2 * 298;
+            signed b2 = (tmp2 + u_b) / 256;
+            signed g2 = (tmp2 + v_g + u_g) / 256;
+            signed r2 = (tmp2 + v_r) / 256;
+
+            jj = x % 4;
+            thr_rb = *(BayerMatrix + (ii << 2) + jj);
+            thr_g = *(BayerMatrix2 + (ig << 1));
+            uint32_t rgb1 =
+                ((dith8to5(kAdjustedClip[r1], thr_rb) >> 3) << 11)
+                | ((dith8to6(kAdjustedClip[g1], thr_g) >> 2) << 5)
+                | (dith8to5(kAdjustedClip[b1], thr_rb) >> 3);
+
+            thr_rb = *(BayerMatrix + (ii << 2) + jj + 1);
+            thr_g = *(BayerMatrix2 + (ig << 1) +1);
+            uint32_t rgb2 =
+                ((dith8to5(kAdjustedClip[r2], thr_rb) >> 3) << 11)
+                | ((dith8to6(kAdjustedClip[g2], thr_g) >> 2) << 5)
+                | (dith8to5(kAdjustedClip[b2], thr_rb) >> 3);
+
+            if (x + 1 < src.cropWidth()) {
+                *(uint32_t *)(&dst_ptr[x]) = (rgb2 << 16) | rgb1;
+            } else {
+                dst_ptr[x] = rgb1;
+            }
+
+#ifndef STATIC_MATRIX_FOR_DITHER
+            if ((x+2)%4 == 0) {
+                matrix_col_exchange(BayerMatrix);
+                if((x+2)%16 == 0) {
+                    matrix_reverse(BayerMatrix);
+                }
+            }
+#endif
+        }
+
+#ifndef STATIC_MATRIX_FOR_DITHER
+        memcpy(BayerMatrix, matrix_bak, 16*sizeof(uint32_t));
+        if ((y+1)%4 == 0) {
+            matrix_row_exchange(BayerMatrix);
+            if((y+1)%16 == 0) {
+                matrix_reverse(BayerMatrix);
+            }
+        }
+#endif
+        src_y += src.mWidth;
+
+        if (y & 1) {
+            src_u += src.mWidth;
+        }
+
+        dst_ptr += dst.mWidth;
+    }
+
+#ifdef DUMP_RGB565
+    FILE* fp = fopen("/data/misc/media/rgb565.raw","wb");
+    dst_ptr = (uint16_t *)dst.mBits + dst.mCropTop * dst.mWidth + dst.mCropLeft;
+    fwrite(dst_ptr, dst.mWidth*dst.mHeight, 2, fp);
+    fclose(fp);
+#endif
 
     return OK;
 }

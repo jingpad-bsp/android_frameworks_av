@@ -138,7 +138,7 @@ public:
     virtual DeviceVector getOutputDevicesForAttributes(
             const audio_attributes_t &attributes,
             const sp<DeviceDescriptor> &preferedDevice = nullptr,
-            bool fromCache = false) const = 0;
+            bool fromCache = false, bool ignoreFM = false) const = 0;
 
     /**
      * @brief getOutputDevicesForStream Legacy function retrieving devices from a stream type.

@@ -35,7 +35,11 @@ public:
 
     virtual ssize_t readAt(off64_t offset, void *data, size_t size);
 
+    virtual status_t getSize(off64_t *size);
+
     virtual sp<DecryptHandle> DrmInitialization(const char *mime);
+
+    virtual void getDrmInfo(sp<DecryptHandle> &handle, DrmManagerClient **client);
 
     static bool requiresDrm(int fd, int64_t offset, int64_t length, const char *mime);
 

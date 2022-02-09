@@ -75,7 +75,11 @@ public:
     VolumeCurves(int indexMin = 0, int indexMax = 100) :
         mIndexMin(indexMin), mIndexMax(indexMax)
     {
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+        addCurrentVolumeIndex(AUDIO_DEVICE_OUT_DEFAULT_FOR_VOLUME, 5);
+#else
         addCurrentVolumeIndex(AUDIO_DEVICE_OUT_DEFAULT_FOR_VOLUME, 0);
+#endif
     }
     status_t initVolume(int indexMin, int indexMax) override
     {

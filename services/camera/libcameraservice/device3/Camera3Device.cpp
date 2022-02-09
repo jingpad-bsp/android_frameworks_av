@@ -60,11 +60,17 @@
 
 #include <tuple>
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "SprdCamera3Tags.h"
+#endif
+
 using namespace android::camera3;
 using namespace android::hardware::camera;
 using namespace android::hardware::camera::device::V3_2;
 
 namespace android {
+
+int Camera3Device::mSunlightFlag = 0;
 
 Camera3Device::Camera3Device(const String8 &id):
         mId(id),
@@ -87,7 +93,23 @@ Camera3Device::Camera3Device(const String8 &id):
         mNeedFixupMonochromeTags(false)
 {
     ATRACE_CALL();
+
+#ifdef SPRD_SLOWMOTION_OPTIMIZE
+    mslowmotion = 0;
+    mslowmotionCnt = 0;
+#endif
     ALOGV("%s: Created device for camera %s", __FUNCTION__, mId.string());
+    ALOGV("%s:mSunlightFlag %d ",__FUNCTION__, mSunlightFlag);
+    sp<IServiceManager> sm = defaultServiceManager();
+    sp<IBinder> binder = sm->checkService(String16("power"));
+    if (binder != NULL) {
+        mPowerManager = interface_cast<IPowerManager>(binder);
+        mPowerManager->setSunLightProtectTemporayDisabled(true);
+        mSunlightFlag = 1;
+        ALOGV("%s: set mSunlightFlag to 1 ", __FUNCTION__);
+    } else {
+        ALOGI("%s:no set camera slp mode",__FUNCTION__);
+    }
 }
 
 Camera3Device::~Camera3Device()
@@ -428,6 +450,20 @@ status_t Camera3Device::disconnectImpl() {
             ALOGE("%s: Stream %d leaked! strong reference (%d)!",
                     __FUNCTION__, stream->getId(), stream->getStrongCount() - 1);
         }
+    }
+
+    ALOGV("%s: get mSunlightFlag:%d", __FUNCTION__, mSunlightFlag);
+    if (mSunlightFlag == 1) {
+      sp<IServiceManager> sm = defaultServiceManager();
+      sp<IBinder> binder = sm->checkService(String16("power"));
+      if (binder != NULL) {
+        mPowerManager = interface_cast<IPowerManager>(binder);
+        mPowerManager->setSunLightProtectTemporayDisabled(false);
+        mSunlightFlag = 0;
+        ALOGV("%s: set mSunlightFlag:%d", __FUNCTION__,  mSunlightFlag);
+      }
+    } else {
+      ALOGI("%s:no set camera slp mode", __FUNCTION__);
     }
 
     ALOGI("%s: X", __FUNCTION__);
@@ -860,7 +896,16 @@ status_t Camera3Device::convertMetadataListToRequestListLocked(
             CLOGE("Can't create capture request");
             return BAD_VALUE;
         }
-
+#ifdef SPRD_SLOWMOTION_OPTIMIZE
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+        if (metadataIt->begin()->metadata.find(ANDROID_REQUEST_OUTPUT_STREAMS).count >=2)  {
+            mslowmotion = metadataIt->begin()->metadata.find(ANDROID_SPRD_SLOW_MOTION).data.u8[0];
+            if(mslowmotion > 1)
+                    mslowmotionCnt = 0;
+            ALOGV("mslowmotion=%d, mslowmotionCnt=%d", mslowmotion,mslowmotionCnt);
+        }
+#endif
+#endif
         newRequest->mRepeating = repeating;
 
         // Setup burst Id and request Id
@@ -1579,6 +1624,10 @@ status_t Camera3Device::clearStreamingRequest(int64_t *lastFrameNumber) {
             SET_ERR_L("Unexpected status: %d", mStatus);
             return INVALID_OPERATION;
     }
+#ifdef SPRD_SLOWMOTION_OPTIMIZE
+    mslowmotionCnt = 0;
+    mslowmotion = 0;
+#endif
     ALOGV("Camera %s: Clearing repeating request", mId.string());
 
     return mRequestThread->clearRepeatingRequests(lastFrameNumber);
@@ -1747,6 +1796,10 @@ status_t Camera3Device::createStream(const std::vector<sp<Surface>>& consumers,
     status_t res;
     bool wasActive = false;
 
+#ifdef CONFIG_CAMERA_SPRD_EIS
+    //if creat preview stream, save preview consumer for eis crop
+    if (dataSpace == HAL_DATASPACE_UNKNOWN && consumers.size()!=0) mPrevWindow = consumers[0];
+#endif
     switch (mStatus) {
         case STATUS_ERROR:
             CLOGE("Device has encountered a serious error");
@@ -3521,6 +3574,8 @@ void Camera3Device::sendCaptureResult(CameraMetadata &pendingMetadata,
                 frameNumber);
         return;
     }
+    nsecs_t sensorTimestamp = timestamp.data.i64[0];
+
     for (auto& physicalMetadata : captureResult.mPhysicalMetadatas) {
         camera_metadata_entry timestamp =
                 physicalMetadata.mPhysicalCameraMetadata.find(ANDROID_SENSOR_TIMESTAMP);
@@ -3575,7 +3630,7 @@ void Camera3Device::sendCaptureResult(CameraMetadata &pendingMetadata,
                 CameraMetadata(m.mPhysicalCameraMetadata));
     }
     mTagMonitor.monitorMetadata(TagMonitor::RESULT,
-            frameNumber, timestamp.data.i64[0], captureResult.mMetadata,
+            frameNumber, sensorTimestamp, captureResult.mMetadata,
             monitoredPhysicalMetadata);
 
     insertResultLocked(&captureResult, frameNumber);
@@ -3610,6 +3665,8 @@ void Camera3Device::processCaptureResult(const camera3_capture_result *result) {
     bool isPartialResult = false;
     CameraMetadata collectedPartialResult;
     bool hasInputBufferInRequest = false;
+    CameraMetadata metadata;
+    metadata = result->result;
 
     // Get shutter timestamp and resultExtras from list of in-flight requests,
     // where it was added by the shutter notification for this frame. If the
@@ -3731,6 +3788,28 @@ void Camera3Device::processCaptureResult(const camera3_capture_result *result) {
             request.pendingOutputBuffers.appendArray(result->output_buffers,
                 result->num_output_buffers);
         } else {
+#ifdef CONFIG_CAMERA_SPRD_EIS
+        if (metadata.exists(ANDROID_SPRD_EIS_CROP)) {
+            camera_metadata_entry crop = metadata.find(ANDROID_SPRD_EIS_CROP);
+            ALOGV("%s:crop.count = %zu", __FUNCTION__, crop.count);
+            if (crop.count > 0) {
+                 int32_t left = crop.data.i32[0];
+                 int32_t top = crop.data.i32[1];
+                 int32_t right = crop.data.i32[2];
+                 int32_t bottom = crop.data.i32[3];
+                 if (right <= 0 || bottom <= 0) {
+                     ALOGD("%s:eis crop region is null", __FUNCTION__);
+                 } else {
+                     android_native_rect_t crop = {left, top, right, bottom};
+                     ALOGD("%s:eis crop %d %d %d %d", __FUNCTION__, left, top,
+                              right, bottom);
+                     native_window_set_crop(mPrevWindow.get(), &crop);
+                   }
+                 }
+            } else {
+                ALOGD("%s: ANDROID_SPRD_EIS_CROP is null", __FUNCTION__);
+            }
+#endif
             bool timestampIncreasing = !(request.zslCapture || request.hasInputBuffer);
             returnOutputBuffers(result->output_buffers,
                 result->num_output_buffers, shutterTimestamp, timestampIncreasing,
@@ -3754,6 +3833,15 @@ void Camera3Device::processCaptureResult(const camera3_capture_result *result) {
                     collectedPartialResult, frameNumber,
                     hasInputBufferInRequest, request.zslCapture && request.stillCapture,
                     request.physicalMetadatas);
+#ifdef CONFIG_CAMERA_SPRD_EIS
+                //when is in dv mode and eis enable, mEisPreviewEnable is true.
+                if(metadata.find(ANDROID_CONTROL_CAPTURE_INTENT).data.u8[0] == ANDROID_CONTROL_CAPTURE_INTENT_VIDEO_RECORD &&
+                    metadata.find(ANDROID_SPRD_EIS_ENABLED).data.u8[0]) {
+                    mEisPreviewEnable = true;
+                } else {
+                    mEisPreviewEnable = false;
+                }
+#endif
             }
         }
 
@@ -5494,7 +5582,306 @@ bool Camera3Device::RequestThread::threadLoop() {
 
     return submitRequestSuccess;
 }
+#ifdef SPRD_SLOWMOTION_OPTIMIZE
+status_t Camera3Device::RequestThread::prepareHalRequests() {
+    ATRACE_CALL();
 
+    bool batchedRequest = mNextRequests[0].captureRequest->mBatchSize > 1;
+    for (size_t i = 0; i < mNextRequests.size(); i++) {
+        auto& nextRequest = mNextRequests.editItemAt(i);
+        sp<CaptureRequest> captureRequest = nextRequest.captureRequest;
+        camera3_capture_request_t* halRequest = &nextRequest.halRequest;
+        Vector<camera3_stream_buffer_t>* outputBuffers = &nextRequest.outputBuffers;
+        camera3_stream_buffer_t   outputBuffer;
+
+        // Prepare a request to HAL
+        halRequest->frame_number = captureRequest->mResultExtras.frameNumber;
+
+        // Insert any queued triggers (before metadata is locked)
+        status_t res = insertTriggers(captureRequest);
+        if (res < 0) {
+            SET_ERR("RequestThread: Unable to insert triggers "
+                    "(capture request %d, HAL device: %s (%d)",
+                    halRequest->frame_number, strerror(-res), res);
+            return INVALID_OPERATION;
+        }
+
+        int triggerCount = res;
+        bool triggersMixedIn = (triggerCount > 0 || mPrevTriggers > 0);
+        mPrevTriggers = triggerCount;
+
+        // If the request is the same as last, or we had triggers last time
+        bool newRequest = (mPrevRequest != captureRequest || triggersMixedIn) &&
+                // Request settings are all the same within one batch, so only treat the first
+                // request in a batch as new
+                !(batchedRequest && i > 0);
+        if (newRequest) {
+            /**
+             * HAL workaround:
+             * Insert a dummy trigger ID if a trigger is set but no trigger ID is
+             */
+            res = addDummyTriggerIds(captureRequest);
+            if (res != OK) {
+                SET_ERR("RequestThread: Unable to insert dummy trigger IDs "
+                        "(capture request %d, HAL device: %s (%d)",
+                        halRequest->frame_number, strerror(-res), res);
+                return INVALID_OPERATION;
+            }
+
+            {
+                // Correct metadata regions for distortion correction if enabled
+                sp<Camera3Device> parent = mParent.promote();
+                if (parent != nullptr) {
+                    List<PhysicalCameraSettings>::iterator it;
+                    for (it = captureRequest->mSettingsList.begin();
+                            it != captureRequest->mSettingsList.end(); it++) {
+                        if (parent->mDistortionMappers.find(it->cameraId) ==
+                                parent->mDistortionMappers.end()) {
+                            continue;
+                        }
+                        res = parent->mDistortionMappers[it->cameraId].correctCaptureRequest(
+                            &(it->metadata));
+                        if (res != OK) {
+                            SET_ERR("RequestThread: Unable to correct capture requests "
+                                    "for lens distortion for request %d: %s (%d)",
+                                    halRequest->frame_number, strerror(-res), res);
+                            return INVALID_OPERATION;
+                        }
+                    }
+                }
+            }
+
+            /**
+             * The request should be presorted so accesses in HAL
+             *   are O(logn). Sidenote, sorting a sorted metadata is nop.
+             */
+            captureRequest->mSettingsList.begin()->metadata.sort();
+            halRequest->settings = captureRequest->mSettingsList.begin()->metadata.getAndLock();
+            mPrevRequest = captureRequest;
+            ALOGVV("%s: Request settings are NEW", __FUNCTION__);
+
+            IF_ALOGV() {
+                camera_metadata_ro_entry_t e = camera_metadata_ro_entry_t();
+                find_camera_metadata_ro_entry(
+                        halRequest->settings,
+                        ANDROID_CONTROL_AF_TRIGGER,
+                        &e
+                );
+                if (e.count > 0) {
+                    ALOGV("%s: Request (frame num %d) had AF trigger 0x%x",
+                          __FUNCTION__,
+                          halRequest->frame_number,
+                          e.data.u8[0]);
+                }
+            }
+        } else {
+            // leave request.settings NULL to indicate 'reuse latest given'
+            ALOGVV("%s: Request settings are REUSED",
+                   __FUNCTION__);
+        }
+
+        if (captureRequest->mSettingsList.size() > 1) {
+            halRequest->num_physcam_settings = captureRequest->mSettingsList.size() - 1;
+            halRequest->physcam_id = new const char* [halRequest->num_physcam_settings];
+            if (newRequest) {
+                halRequest->physcam_settings =
+                    new const camera_metadata* [halRequest->num_physcam_settings];
+            } else {
+                halRequest->physcam_settings = nullptr;
+            }
+            auto it = ++captureRequest->mSettingsList.begin();
+            size_t i = 0;
+            for (; it != captureRequest->mSettingsList.end(); it++, i++) {
+                halRequest->physcam_id[i] = it->cameraId.c_str();
+                if (newRequest) {
+                    it->metadata.sort();
+                    halRequest->physcam_settings[i] = it->metadata.getAndLock();
+                }
+            }
+        }
+
+        uint32_t totalNumBuffers = 0;
+
+        // Fill in buffers
+        if (captureRequest->mInputStream != NULL) {
+            halRequest->input_buffer = &captureRequest->mInputBuffer;
+            totalNumBuffers += 1;
+        } else {
+            halRequest->input_buffer = NULL;
+        }
+
+        ALOGVV("mslowmotion (%d) ,mslowmotionCnt %d", parent->mslowmotion, parent->mslowmotionCnt);
+        //outputBuffers->insertAt(camera3_stream_buffer_t(), 0,
+        //        captureRequest->mOutputStreams.size());
+        //halRequest->output_buffers = outputBuffers->array();
+        std::set<String8> requestedPhysicalCameras;
+
+        sp<Camera3Device> parent = mParent.promote();
+        if (parent == NULL) {
+            // Should not happen, and nowhere to send errors to, so just log it
+            CLOGE("RequestThread: Parent is gone");
+            return INVALID_OPERATION;
+        }
+        nsecs_t waitDuration = kBaseGetBufferWait + parent->getExpectedInFlightDuration();
+
+        SurfaceMap uniqueSurfaceIdMap;
+        for (size_t j = 0; j < captureRequest->mOutputStreams.size(); j++) {
+            sp<Camera3OutputStreamInterface> outputStream =
+                    captureRequest->mOutputStreams.editItemAt(j);
+
+            if(parent->mslowmotion > 1 && parent->mslowmotionCnt % parent->mslowmotion != 0 &&  !outputStream->isVideoStream())
+                continue;
+
+            int streamId = outputStream->getId();
+
+            // Prepare video buffers for high speed recording on the first video request.
+            if (mPrepareVideoStream && outputStream->isVideoStream()) {
+                // Only try to prepare video stream on the first video request.
+                mPrepareVideoStream = false;
+
+                res = outputStream->startPrepare(Camera3StreamInterface::ALLOCATE_PIPELINE_MAX,
+                        false /*blockRequest*/);
+                while (res == NOT_ENOUGH_DATA) {
+                    res = outputStream->prepareNextBuffer();
+                }
+                if (res != OK) {
+                    ALOGW("%s: Preparing video buffers for high speed failed: %s (%d)",
+                        __FUNCTION__, strerror(-res), res);
+                    outputStream->cancelPrepare();
+                }
+            }
+
+            std::vector<size_t> uniqueSurfaceIds;
+            res = outputStream->getUniqueSurfaceIds(
+                    captureRequest->mOutputSurfaces[streamId],
+                    &uniqueSurfaceIds);
+            // INVALID_OPERATION is normal output for streams not supporting surfaceIds
+            if (res != OK && res != INVALID_OPERATION) {
+                ALOGE("%s: failed to query stream %d unique surface IDs",
+                        __FUNCTION__, streamId);
+                return res;
+            }
+            if (res == OK) {
+                uniqueSurfaceIdMap.insert({streamId, std::move(uniqueSurfaceIds)});
+            }
+
+            if (mUseHalBufManager) {
+                if (outputStream->isAbandoned()) {
+                    ALOGE("%s: stream %d is abandoned.", __FUNCTION__, streamId);
+                    return TIMED_OUT;
+                }
+                // HAL will request buffer through requestStreamBuffer API
+                camera3_stream_buffer_t& buffer = outputBuffers->editItemAt(j);
+                buffer.stream = outputStream->asHalStream();
+                buffer.buffer = nullptr;
+                buffer.status = CAMERA3_BUFFER_STATUS_OK;
+                buffer.acquire_fence = -1;
+                buffer.release_fence = -1;
+            } else {
+                //res = outputStream->getBuffer(&outputBuffers->editItemAt(j),
+                //        waitDuration,
+                //        captureRequest->mOutputSurfaces[streamId]);
+                res = outputStream->getBuffer(&outputBuffer,
+                        waitDuration,
+                        captureRequest->mOutputSurfaces[streamId]);
+                if (res != OK) {
+                    // Can't get output buffer from gralloc queue - this could be due to
+                    // abandoned queue or other consumer misbehavior, so not a fatal
+                    // error
+                    ALOGE("RequestThread: Can't get output buffer, skipping request:"
+                            " %s (%d)", strerror(-res), res);
+
+                    return TIMED_OUT;
+                }
+            }
+
+            {
+                sp<Camera3Device> parent = mParent.promote();
+                if (parent != nullptr) {
+                    const String8& streamCameraId = outputStream->getPhysicalCameraId();
+                    for (const auto& settings : captureRequest->mSettingsList) {
+                        if ((streamCameraId.isEmpty() &&
+                                parent->getId() == settings.cameraId.c_str()) ||
+                                streamCameraId == settings.cameraId.c_str()) {
+                            outputStream->fireBufferRequestForFrameNumber(
+                                    captureRequest->mResultExtras.frameNumber,
+                                    settings.metadata);
+                        }
+                    }
+                }
+            }
+
+            String8 physicalCameraId = outputStream->getPhysicalCameraId();
+
+            if (!physicalCameraId.isEmpty()) {
+                // Physical stream isn't supported for input request.
+                if (halRequest->input_buffer) {
+                    CLOGE("Physical stream is not supported for input request");
+                    return INVALID_OPERATION;
+                }
+                requestedPhysicalCameras.insert(physicalCameraId);
+            }
+            outputBuffers->push(outputBuffer);
+            halRequest->num_output_buffers++;
+        }
+
+        if(halRequest->num_output_buffers < 1) {
+                ALOGE("RequestThread: Can't get output buffer, skipping request:"  " %s (%d)",
+                      strerror(-res), res);
+                return TIMED_OUT;
+        }
+
+        halRequest->output_buffers = outputBuffers->array();
+        totalNumBuffers += halRequest->num_output_buffers;
+
+        // Log request in the in-flight queue
+        // If this request list is for constrained high speed recording (not
+        // preview), and the current request is not the last one in the batch,
+        // do not send callback to the app.
+        bool hasCallback = true;
+        if (batchedRequest && i != mNextRequests.size()-1) {
+            hasCallback = false;
+        }
+        bool isStillCapture = false;
+        bool isZslCapture = false;
+        if (!mNextRequests[0].captureRequest->mSettingsList.begin()->metadata.isEmpty()) {
+            camera_metadata_ro_entry_t e = camera_metadata_ro_entry_t();
+            find_camera_metadata_ro_entry(halRequest->settings, ANDROID_CONTROL_CAPTURE_INTENT, &e);
+            if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_CAPTURE_INTENT_STILL_CAPTURE)) {
+                isStillCapture = true;
+                ATRACE_ASYNC_BEGIN("still capture", mNextRequests[i].halRequest.frame_number);
+            }
+
+            find_camera_metadata_ro_entry(halRequest->settings, ANDROID_CONTROL_ENABLE_ZSL, &e);
+            if ((e.count > 0) && (e.data.u8[0] == ANDROID_CONTROL_ENABLE_ZSL_TRUE)) {
+                isZslCapture = true;
+            }
+        }
+        res = parent->registerInFlight(halRequest->frame_number,
+                totalNumBuffers, captureRequest->mResultExtras,
+                /*hasInput*/halRequest->input_buffer != NULL,
+                hasCallback,
+                calculateMaxExpectedDuration(halRequest->settings),
+                requestedPhysicalCameras, isStillCapture, isZslCapture,
+                (mUseHalBufManager) ? uniqueSurfaceIdMap :
+                                      SurfaceMap{});
+        ALOGVV("%s: registered in flight requestId = %" PRId32 ", frameNumber = %" PRId64
+               ", burstId = %" PRId32 ".",
+                __FUNCTION__,
+                captureRequest->mResultExtras.requestId, captureRequest->mResultExtras.frameNumber,
+                captureRequest->mResultExtras.burstId);
+        if (res != OK) {
+            SET_ERR("RequestThread: Unable to register new in-flight request:"
+                    " %s (%d)", strerror(-res), res);
+            return INVALID_OPERATION;
+        }
+        if(parent->mslowmotion > 1)
+            parent->mslowmotionCnt++;
+    }
+
+    return OK;
+}
+#else
 status_t Camera3Device::RequestThread::prepareHalRequests() {
     ATRACE_CALL();
 
@@ -5773,6 +6160,7 @@ status_t Camera3Device::RequestThread::prepareHalRequests() {
 
     return OK;
 }
+#endif
 
 CameraMetadata Camera3Device::RequestThread::getLatestRequest() const {
     ATRACE_CALL();
@@ -6779,4 +7167,4 @@ status_t Camera3Device::fixupMonochromeTags(const CameraMetadata& deviceInfo,
     return res;
 }
 
-}; // namespace android
+}; // nam

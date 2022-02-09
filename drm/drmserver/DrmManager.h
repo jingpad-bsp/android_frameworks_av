@@ -154,6 +154,7 @@ private:
     int mDecryptSessionId;
     int mConvertId;
     Mutex mLock;
+    Mutex mIDLock;
     Mutex mListenerLock;
     Mutex mDecryptLock;
     Mutex mConvertLock;

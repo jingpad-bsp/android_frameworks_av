@@ -122,6 +122,7 @@ private:
     static bool ParseSingleUnsignedLong(
             const char *from, unsigned long *x);
 
+#include "ARTSPConnectionEx.h"
     DISALLOW_EVIL_CONSTRUCTORS(ARTSPConnection);
 };
 

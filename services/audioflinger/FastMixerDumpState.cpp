@@ -42,6 +42,7 @@ FastMixerDumpState::~FastMixerDumpState()
 {
 }
 
+#ifdef FAST_THREAD_STATISTICS
 // helper function called by qsort()
 static int compare_uint32_t(const void *pa, const void *pb)
 {
@@ -55,7 +56,7 @@ static int compare_uint32_t(const void *pa, const void *pb)
         return 0;
     }
 }
-
+#endif
 void FastMixerDumpState::dump(int fd) const
 {
     if (mCommand == FastMixerState::INITIAL) {

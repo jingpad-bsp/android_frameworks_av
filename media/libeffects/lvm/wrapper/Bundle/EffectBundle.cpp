@@ -256,6 +256,8 @@ extern "C" int EffectCreate(const effect_uuid_t *uuid,
         pContext->pBundledContext->NumberEffectsEnabled     = 0;
         pContext->pBundledContext->NumberEffectsCalled      = 0;
         pContext->pBundledContext->firstVolume              = LVM_TRUE;
+        pContext->pBundledContext->bFirstVolumeSetting      = LVM_TRUE;
+        pContext->pBundledContext->bProcessStarted          = LVM_FALSE;
         pContext->pBundledContext->volume                   = 0;
 
         #ifdef LVM_PCM
@@ -1059,7 +1061,7 @@ void LvmEffect_limitLevel(EffectContext *pContext) {
         gainCorrection = maxLevelRound + pContext->pBundledContext->volume;
     }
 
-    ActiveParams.VC_EffectLevel  = pContext->pBundledContext->volume - gainCorrection;
+    ActiveParams.VC_EffectLevel  = pContext->pBundledContext->volume - maxLevelRound;//gainCorrection;
     if (ActiveParams.VC_EffectLevel < -96) {
         ActiveParams.VC_EffectLevel = -96;
     }
@@ -3367,6 +3369,7 @@ int Effect_process(effect_handle_t     self,
             }
             return status;
         }
+        pContext->pBundledContext->bProcessStarted= LVM_TRUE;
     } else {
         //ALOGV("\tEffect_process Not Calling process with %d effects enabled, %d called: Effect %d",
         //pContext->pBundledContext->NumberEffectsEnabled,
@@ -3855,6 +3858,12 @@ int Effect_command(effect_handle_t  self,
             //        leftdB, rightdB, pandB);
 
             memcpy(pReplyData, vol_ret, sizeof(int32_t)*2);
+            if(pContext->pBundledContext->bFirstVolumeSetting == LVM_TRUE) {
+                pContext->pBundledContext->bFirstVolumeSetting = LVM_FALSE;
+                if(pContext->pBundledContext->bProcessStarted == LVM_TRUE) {
+                    pContext->pBundledContext->firstVolume = LVM_TRUE;
+                }
+            }
             android::VolumeSetVolumeLevel(pContext, (int16_t)(maxdB*100));
 
             /* Get the current settings */

@@ -53,6 +53,7 @@ protected:
     int mFd;
     int64_t mOffset;
     int64_t mLength;
+    int64_t mContainerBasedDrmLength;
     Mutex mLock;
 
 private:

@@ -3131,6 +3131,14 @@ status_t MPEG4Writer::Track::threadEntry() {
         if (!mIsHeic) {
             if (mStszTableEntries->count() == 0) {
                 mFirstSampleTimeRealUs = systemTime() / 1000;
+                if((timestampUs<0)&&(mIsAudio)){
+                    mStartTimestampUs = timestampUs;
+                    copy->release();
+                    copy=NULL;
+                    ALOGW("audio record continue  before setStartTimestampUs: %" PRId64, mStartTimestampUs);
+                    continue;
+                }
+                ALOGV("set start time:%lld",(long long)mStartTimestampUs);
                 mOwner->setStartTimestampUs(timestampUs);
                 mStartTimestampUs = timestampUs;
                 previousPausedDurationUs = mStartTimestampUs;
@@ -3280,6 +3288,12 @@ status_t MPEG4Writer::Track::threadEntry() {
             if (currDurationTicks < 0LL) {
                 ALOGE("do not support out of order frames (timestamp: %lld < last: %lld for %s track",
                         (long long)timestampUs, (long long)lastTimestampUs, trackName);
+                if(mIsAudio){
+                    copy->release();
+                    copy=NULL;
+                    ALOGW("audio record continue");
+                    continue;
+                }
                 copy->release();
                 mSource->stop();
                 mIsMalformed = true;

@@ -167,7 +167,9 @@ struct Parameters {
     int precaptureTriggerCounter;
 
     int takePictureCounter;
-
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+   #include "api1/client2/ParametersEx.h"
+#endif
     uint32_t previewCallbackFlags;
     bool previewCallbackOneShot;
     bool previewCallbackSurface;
@@ -181,6 +183,9 @@ struct Parameters {
     // Whether the device supports enableZsl.
     bool isDeviceZslSupported;
     // Whether the device supports geometric distortion correction
+#ifdef CONFIG_CAMERA_SPRD_EIS
+    bool eisMode;
+#endif
     bool isDistortionCorrectionSupported;
 
     // Overall camera state

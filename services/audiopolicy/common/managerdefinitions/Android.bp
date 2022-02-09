@@ -47,6 +47,7 @@ cc_library_static {
     cflags: [
         "-Wall",
         "-Werror",
+        "-DSPRD_CUSTOM_AUDIO_POLICY",
     ],
 
 }

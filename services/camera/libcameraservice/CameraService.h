@@ -802,7 +802,7 @@ private:
 
     // Basic flag on whether the camera subsystem is in a usable state
     bool                mInitialized;
-
+    bool                mMultiCameraInUse;
     sp<CameraProviderManager> mCameraProviderManager;
 
     class ServiceListener : public virtual IBinder::DeathRecipient {

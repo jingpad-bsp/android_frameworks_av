@@ -100,6 +100,7 @@ void AMessage::freeItemValue(Item *item) {
         case kTypeString:
         {
             delete item->u.stringValue;
+            item->u.stringValue=NULL;
             break;
         }
 
@@ -344,8 +345,10 @@ void AMessage::setRect(
 bool AMessage::findString(const char *name, AString *value) const {
     const Item *item = findItem(name, kTypeString);
     if (item) {
-        *value = *item->u.stringValue;
-        return true;
+        if(item->u.stringValue) {
+            *value = *item->u.stringValue;
+            return true;
+        }
     }
     return false;
 }
@@ -484,8 +487,13 @@ sp<AMessage> AMessage::dup() const {
         switch (from->mType) {
             case kTypeString:
             {
-                to->u.stringValue =
-                    new AString(*from->u.stringValue);
+                if (from->u.stringValue != NULL) {
+                    to->u.stringValue =
+                        new AString(*from->u.stringValue);
+                } else {
+                    to->u.stringValue = new AString();
+                    ALOGI("dup() stringValue is null");
+                }
                 break;
             }
 

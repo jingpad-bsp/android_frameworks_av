@@ -155,6 +155,9 @@ public:
     /**
      * Interface used by CameraService
      */
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "api2/CameraDeviceClientEx.h"
+#endif
 
     CameraDeviceClient(const sp<CameraService>& cameraService,
             const sp<hardware::camera2::ICameraDeviceCallbacks>& remoteCallback,

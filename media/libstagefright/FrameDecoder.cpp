@@ -36,6 +36,8 @@
 #include <media/stagefright/Utils.h>
 #include <private/media/VideoFrame.h>
 #include <utils/Log.h>
+#include "include/avc_utils_sprd.h"
+
 
 namespace android {
 
@@ -184,7 +186,7 @@ FrameDecoder::FrameDecoder(
       mDstFormat(OMX_COLOR_Format16bitRGB565),
       mDstBpp(2),
       mHaveMoreInputs(true),
-      mFirstSample(true) {
+      mFirstSample(true){
 }
 
 FrameDecoder::~FrameDecoder() {
@@ -408,7 +410,8 @@ VideoFrameDecoder::VideoFrameDecoder(
       mSeekMode(MediaSource::ReadOptions::SEEK_PREVIOUS_SYNC),
       mTargetTimeUs(-1LL),
       mNumFrames(0),
-      mNumFramesDecoded(0) {
+      mNumFramesDecoded(0),
+      mIsInterlaceFrame(false){
 }
 
 sp<AMessage> VideoFrameDecoder::onGetFormatAndSeekOptions(
@@ -451,12 +454,20 @@ sp<AMessage> VideoFrameDecoder::onGetFormatAndSeekOptions(
     // TODO: Use Flexible color instead
     videoFormat->setInt32("color-format", OMX_COLOR_FormatYUV420Planar);
 
+    bool isVideoAVC = !strcasecmp(MEDIA_MIMETYPE_VIDEO_AVC,mime);
+    sp<ABuffer> sps;
+    if (isVideoAVC && videoFormat->findBuffer("csd-0", &sps) && (isInterlacedSequence(sps->data(), sps->size()) == 1)) {
+        ALOGI("interlace avc stream, more inputs");
+        mIsInterlaceFrame = true;
+    }
+
+
     // For the thumbnail extraction case, try to allocate single buffer in both
     // input and output ports, if seeking to a sync frame. NOTE: This request may
     // fail if component requires more than that for decoding.
     bool isSeekingClosest = (mSeekMode == MediaSource::ReadOptions::SEEK_CLOSEST)
             || (mSeekMode == MediaSource::ReadOptions::SEEK_FRAME_INDEX);
-    if (!isSeekingClosest) {
+    if (!isSeekingClosest && !mIsInterlaceFrame) {
         videoFormat->setInt32("android._num-input-buffers", 1);
         videoFormat->setInt32("android._num-output-buffers", 1);
     }
@@ -475,7 +486,7 @@ status_t VideoFrameDecoder::onInputReceived(
     }
 
     if (mIsAvcOrHevc && !isSeekingClosest
-            && IsIDR(codecBuffer->data(), codecBuffer->size())) {
+            && IsIDR(codecBuffer->data(), codecBuffer->size()) && !mIsInterlaceFrame) {
         // Only need to decode one IDR frame, unless we're seeking with CLOSEST
         // option, in which case we need to actually decode to targetTimeUs.
         *flags |= MediaCodec::BUFFER_FLAG_EOS;
@@ -737,6 +748,20 @@ status_t ImageDecoder::onOutputReceived(
         crop_right = width - 1;
         crop_bottom = height - 1;
     }
+
+    //Bug 1151156
+    int32_t crop_width, crop_height;
+    crop_width = crop_right - crop_left + 1;
+    crop_height = crop_bottom - crop_top + 1;
+    if (crop_width != width || crop_height != height) {
+        ALOGW("%s, %d, crop width = %d, crop height = %d, width = %d, height = %d",
+                      __FUNCTION__, __LINE__, crop_width, crop_height, width, height);
+        dstLeft = mTilesDecoded % mGridCols * crop_width;
+        dstTop = mTilesDecoded / mGridCols * crop_height;
+        dstRight = dstLeft + crop_width - 1;
+        dstBottom = dstTop + crop_height - 1;
+    }
+    //
 
     // apply crop on bottom-right
     // TODO: need to move this into the color converter itself.

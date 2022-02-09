@@ -19,6 +19,20 @@
     #error This header file should only be included from AudioFlinger.h
 #endif
 
+#ifdef AUDIO_FW_PCM_DUMP
+#define AUDIO_FW_PCM_DUMP_DEVICES    "af.media.audiofw.devices.dump"
+#define AUDIO_FW_PCM_DUMP_SWITCH    "af.media.audiofw.dump"
+#define AUDIO_FW_PCM_DUMP_MIXERTHREAD    (1<<1)
+#define AUDIO_FW_PCM_DUMP_OFFLOADTHREAD    (1<<2)
+#define AUDIO_FW_PCM_DUMP_DUPLICATINGTHREAD    (1<<3)
+#define AUDIO_FW_PCM_DUMP_DIRECTTHREAD    (1<<4)
+#define AUDIO_FW_PCM_DUMP_RECORDTHREAD    (1<<5)
+#define AUDIO_FW_PCM_DUMP_TRACKS    (1<<6)
+#define AUDIO_FW_PCM_DUMP_AUDIORECORD    (1<<7)
+
+#define AUDIO_FW_PCM_DUMP_MIXERTHREAD_PATH   "/data/vendor/local/media"
+#endif
+
 // base for record and playback
 class TrackBase : public ExtendedAudioBufferProvider, public RefBase {
 
@@ -215,6 +229,8 @@ protected:
 
     uint32_t channelCount() const { return mChannelCount; }
 
+    size_t frameSize() const { return mFrameSize; }
+
     audio_channel_mask_t channelMask() const { return mChannelMask; }
 
     virtual uint32_t sampleRate() const { return mSampleRate; }
@@ -315,6 +331,10 @@ protected:
     std::atomic<FrameTime> mKernelFrameTime{};     // last frame time on kernel side.
     const pid_t         mCreatorPid;  // can be different from mclient->pid() for instance
                                       // when created by NuPlayer on behalf of a client
+
+#ifdef AUDIO_FW_PCM_DUMP
+    FILE *pcmFile;
+#endif
 };
 
 // PatchProxyBufferProvider interface is implemented by PatchTrack and PatchRecord.

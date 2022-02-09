@@ -27,6 +27,7 @@
 #include "include/ESDS.h"
 #include "include/HevcUtils.h"
 
+#include <arpa/inet.h>
 #include <cutils/properties.h>
 #include <media/openmax/OMX_Audio.h>
 #include <media/openmax/OMX_Video.h>
@@ -1908,6 +1909,16 @@ AString MakeUserAgent() {
     ua.append(value);
     ua.append(")");
 
+    char uaProfile[PROPERTY_VALUE_MAX];
+    property_get("ro.ua.profile", uaProfile, "Unknown");
+    if (strncmp(uaProfile, "Unknown", 7) == 0) {
+        ALOGV("MakeUserAgent ua profile is Unknown");
+    } else {
+        ua.append("\r\nx-wap-profile: ");
+        ua.append(uaProfile);
+        ALOGV("MakeUserAgent ua profile is: %s", uaProfile);
+    }
+
     return ua;
 }
 
@@ -2020,7 +2031,7 @@ status_t getAudioOffloadInfo(const sp<MetaData>& meta, bool hasVideo,
         bool isStreaming, audio_stream_type_t streamType, audio_offload_info_t *info)
 {
     const char *mime;
-    if (meta == NULL) {
+    if (meta == NULL || isStreaming) {
         return BAD_VALUE;
     }
     CHECK(meta->findCString(kKeyMIMEType, &mime));

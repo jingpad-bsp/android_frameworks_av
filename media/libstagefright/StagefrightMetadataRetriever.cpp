@@ -575,9 +575,9 @@ void StagefrightMetadataRetriever::parseMetaData() {
                 }
             } else if (!hasVideo && !strncasecmp("video/", mime, 6)) {
                 hasVideo = true;
-
-                CHECK(trackMeta->findInt32(kKeyWidth, &videoWidth));
-                CHECK(trackMeta->findInt32(kKeyHeight, &videoHeight));
+                if(!trackMeta->findInt32(kKeyWidth, &videoWidth)||!trackMeta->findInt32(kKeyHeight, &videoHeight)){
+                    continue;
+                }
                 if (!trackMeta->findInt32(kKeyRotation, &rotationAngle)) {
                     rotationAngle = 0;
                 }

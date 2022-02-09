@@ -204,6 +204,9 @@ private:
     bool mAudioTornDown;
     audio_offload_info_t mCurrentOffloadInfo;
 
+    //fix bug 1061474
+    bool needInitializationMediaUsToZero;
+
     struct PcmInfo {
         audio_channel_mask_t mChannelMask;
         audio_output_flags_t mFlags;
@@ -240,7 +243,7 @@ private:
     void setAudioFirstAnchorTimeIfNeeded_l(int64_t mediaUs);
     void setVideoLateByUs(int64_t lateUs);
 
-    void onNewAudioMediaTime(int64_t mediaTimeUs);
+    void onNewAudioMediaTime(int64_t mediaTimeUs,bool lock = true);
     int64_t getRealTimeUs(int64_t mediaTimeUs, int64_t nowUs);
 
     void onDrainVideoQueue();
@@ -263,7 +266,7 @@ private:
     void onPause();
     void onResume();
     void onSetVideoFrameRate(float fps);
-    int32_t getQueueGeneration(bool audio);
+    int32_t getQueueGeneration(bool audio, bool nolock =  false);
     int32_t getDrainGeneration(bool audio);
     bool getSyncQueues();
     void onAudioTearDown(AudioTearDownReason reason);
@@ -285,7 +288,7 @@ private:
     void notifyAudioTearDown(AudioTearDownReason reason);
 
     void flushQueue(List<QueueEntry> *queue);
-    bool dropBufferIfStale(bool audio, const sp<AMessage> &msg);
+    bool dropBufferIfStale(bool audio, const sp<AMessage> &msg,bool nolock = false);
     void syncQueuesDone_l();
 
     bool offloadingAudio() const { return (mFlags & FLAG_OFFLOAD_AUDIO) != 0; }

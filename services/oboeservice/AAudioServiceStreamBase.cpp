@@ -22,6 +22,8 @@
 #include <iostream>
 #include <mutex>
 
+#include <mediautils/SchedulingPolicyService.h>
+
 #include "binding/IAAudioService.h"
 #include "binding/AAudioServiceMessage.h"
 #include "utility/AudioClock.h"
@@ -126,12 +128,17 @@ error:
 }
 
 aaudio_result_t AAudioServiceStreamBase::close() {
+    std::lock_guard<std::mutex> lock(mLock);
+    return close_l();
+}
+
+aaudio_result_t AAudioServiceStreamBase::close_l() {
     aaudio_result_t result = AAUDIO_OK;
     if (getState() == AAUDIO_STREAM_STATE_CLOSED) {
         return AAUDIO_OK;
     }
 
-    stop();
+    stop_l();
 
     sp<AAudioServiceEndpoint> endpoint = mServiceEndpointWeak.promote();
     if (endpoint == nullptr) {
@@ -142,7 +149,7 @@ aaudio_result_t AAudioServiceStreamBase::close() {
         endpointManager.closeEndpoint(endpoint);
 
         // AAudioService::closeStream() prevents two threads from closing at the same time.
-        mServiceEndpoint.clear(); // endpoint will hold the pointer until this method returns.
+        mServiceEndpoint.clear(); // endpoint will hold the pointer after this method returns.
     }
 
     {
@@ -172,7 +179,14 @@ aaudio_result_t AAudioServiceStreamBase::startDevice() {
  * An AAUDIO_SERVICE_EVENT_STARTED will be sent to the client when complete.
  */
 aaudio_result_t AAudioServiceStreamBase::start() {
-    aaudio_result_t result = AAUDIO_OK;
+    std::lock_guard<std::mutex> lock(mLock);
+
+    if (auto state = getState();
+        state == AAUDIO_STREAM_STATE_CLOSED || state == AAUDIO_STREAM_STATE_DISCONNECTED) {
+        ALOGW("%s() already CLOSED, returns INVALID_STATE, handle = %d",
+                __func__, getHandle());
+        return AAUDIO_ERROR_INVALID_STATE;
+    }
 
     if (isRunning()) {
         return AAUDIO_OK;
@@ -185,7 +199,7 @@ aaudio_result_t AAudioServiceStreamBase::start() {
     mAtomicStreamTimestamp.clear();
 
     mClientHandle = AUDIO_PORT_HANDLE_NONE;
-    result = startDevice();
+    aaudio_result_t result = startDevice();
     if (result != AAUDIO_OK) goto error;
 
     // This should happen at the end of the start.
@@ -198,23 +212,24 @@ aaudio_result_t AAudioServiceStreamBase::start() {
     return result;
 
 error:
-    disconnect();
+    disconnect_l();
     return result;
 }
 
 aaudio_result_t AAudioServiceStreamBase::pause() {
+    std::lock_guard<std::mutex> lock(mLock);
+    return pause_l();
+}
+
+aaudio_result_t AAudioServiceStreamBase::pause_l() {
     aaudio_result_t result = AAUDIO_OK;
     if (!isRunning()) {
         return result;
     }
 
-    // Send it now because the timestamp gets rounded up when stopStream() is called below.
-    // Also we don't need the timestamps while we are shutting down.
-    sendCurrentTimestamp();
-
     result = stopTimestampThread();
     if (result != AAUDIO_OK) {
-        disconnect();
+        disconnect_l();
         return result;
     }
 
@@ -226,7 +241,7 @@ aaudio_result_t AAudioServiceStreamBase::pause() {
     result = endpoint->stopStream(this, mClientHandle);
     if (result != AAUDIO_OK) {
         ALOGE("%s() mServiceEndpoint returned %d, %s", __func__, result, getTypeText());
-        disconnect(); // TODO should we return or pause Base first?
+        disconnect_l(); // TODO should we return or pause Base first?
     }
 
     sendServiceEvent(AAUDIO_SERVICE_EVENT_PAUSED);
@@ -235,6 +250,11 @@ aaudio_result_t AAudioServiceStreamBase::pause() {
 }
 
 aaudio_result_t AAudioServiceStreamBase::stop() {
+    std::lock_guard<std::mutex> lock(mLock);
+    return stop_l();
+}
+
+aaudio_result_t AAudioServiceStreamBase::stop_l() {
     aaudio_result_t result = AAUDIO_OK;
     if (!isRunning()) {
         return result;
@@ -242,12 +262,14 @@ aaudio_result_t AAudioServiceStreamBase::stop() {
 
     setState(AAUDIO_STREAM_STATE_STOPPING);
 
-    // Send it now because the timestamp gets rounded up when stopStream() is called below.
-    // Also we don't need the timestamps while we are shutting down.
-    sendCurrentTimestamp(); // warning - this calls a virtual function
+    // Temporarily unlock because we are joining the timestamp thread and it may try
+    // to acquire mLock.
+    mLock.unlock();
     result = stopTimestampThread();
+    mLock.lock();
+
     if (result != AAUDIO_OK) {
-        disconnect();
+        disconnect_l();
         return result;
     }
 
@@ -260,7 +282,7 @@ aaudio_result_t AAudioServiceStreamBase::stop() {
     result = endpoint->stopStream(this, mClientHandle);
     if (result != AAUDIO_OK) {
         ALOGE("%s() stopStream returned %d, %s", __func__, result, getTypeText());
-        disconnect();
+        disconnect_l();
         // TODO what to do with result here?
     }
 
@@ -279,6 +301,7 @@ aaudio_result_t AAudioServiceStreamBase::stopTimestampThread() {
 }
 
 aaudio_result_t AAudioServiceStreamBase::flush() {
+    std::lock_guard<std::mutex> lock(mLock);
     aaudio_result_t result = AAudio_isFlushAllowed(getState());
     if (result != AAUDIO_OK) {
         return result;
@@ -299,10 +322,11 @@ void AAudioServiceStreamBase::run() {
     timestampScheduler.start(AudioClock::getNanoseconds());
     int64_t nextTime = timestampScheduler.nextAbsoluteTime();
     int32_t loopCount = 0;
+    aaudio_result_t result = AAUDIO_OK;
     while(mThreadEnabled.load()) {
         loopCount++;
         if (AudioClock::getNanoseconds() >= nextTime) {
-            aaudio_result_t result = sendCurrentTimestamp();
+            result = sendCurrentTimestamp();
             if (result != AAUDIO_OK) {
                 ALOGE("%s() timestamp thread got result = %d", __func__, result);
                 break;
@@ -314,14 +338,67 @@ void AAudioServiceStreamBase::run() {
             AudioClock::sleepUntilNanoTime(nextTime);
         }
     }
+    // This was moved from the calls in stop_l() and pause_l(), which could cause a deadlock
+    // if it resulted in a call to disconnect.
+    if (result == AAUDIO_OK) {
+        (void) sendCurrentTimestamp();
+    }
     ALOGD("%s() %s exiting after %d loops <<<<<<<<<<<<<< TIMESTAMPS",
           __func__, getTypeText(), loopCount);
 }
 
 void AAudioServiceStreamBase::disconnect() {
-    if (getState() != AAUDIO_STREAM_STATE_DISCONNECTED) {
+    std::lock_guard<std::mutex> lock(mLock);
+    disconnect_l();
+}
+
+void AAudioServiceStreamBase::disconnect_l() {
+    if (getState() != AAUDIO_STREAM_STATE_DISCONNECTED
+        && getState() != AAUDIO_STREAM_STATE_CLOSED) {
         sendServiceEvent(AAUDIO_SERVICE_EVENT_DISCONNECTED);
         setState(AAUDIO_STREAM_STATE_DISCONNECTED);
+    }
+}
+
+aaudio_result_t AAudioServiceStreamBase::registerAudioThread(pid_t clientThreadId,
+        int priority) {
+    std::lock_guard<std::mutex> lock(mLock);
+    aaudio_result_t result = AAUDIO_OK;
+    if (getRegisteredThread() != AAudioServiceStreamBase::ILLEGAL_THREAD_ID) {
+        ALOGE("AAudioService::registerAudioThread(), thread already registered");
+        result = AAUDIO_ERROR_INVALID_STATE;
+    } else {
+        const pid_t ownerPid = IPCThreadState::self()->getCallingPid(); // TODO review
+        setRegisteredThread(clientThreadId);
+        int err = android::requestPriority(ownerPid, clientThreadId,
+                                           priority, true /* isForApp */);
+        if (err != 0) {
+            ALOGE("AAudioService::registerAudioThread(%d) failed, errno = %d, priority = %d",
+                  clientThreadId, errno, priority);
+            result = AAUDIO_ERROR_INTERNAL;
+        }
+    }
+    return result;
+}
+
+aaudio_result_t AAudioServiceStreamBase::unregisterAudioThread(pid_t clientThreadId) {
+    std::lock_guard<std::mutex> lock(mLock);
+    aaudio_result_t result = AAUDIO_OK;
+    if (getRegisteredThread() != clientThreadId) {
+        ALOGE("%s(), wrong thread", __func__);
+        result = AAUDIO_ERROR_ILLEGAL_ARGUMENT;
+    } else {
+        setRegisteredThread(0);
+    }
+    return result;
+}
+
+void AAudioServiceStreamBase::setState(aaudio_stream_state_t state) {
+    // CLOSED is a final state.
+    if (mState != AAUDIO_STREAM_STATE_CLOSED) {
+        mState = state;
+    } else {
+        ALOGW_IF(mState != state, "%s(%d) when already CLOSED", __func__, state);
     }
 }
 
@@ -422,6 +499,7 @@ aaudio_result_t AAudioServiceStreamBase::sendCurrentTimestamp() {
  * used to communicate with the underlying HAL or Service.
  */
 aaudio_result_t AAudioServiceStreamBase::getDescription(AudioEndpointParcelable &parcelable) {
+    std::lock_guard<std::mutex> lock(mLock);
     {
         std::lock_guard<std::mutex> lock(mUpMessageQueueLock);
         if (mUpMessageQueue == nullptr) {

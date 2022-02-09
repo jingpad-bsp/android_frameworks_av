@@ -139,6 +139,7 @@ cc_library {
         "HevcUtils.cpp",
         "InterfaceUtils.cpp",
         "JPEGSource.cpp",
+        "MP3Writer.cpp",
         "MPEG2TSWriter.cpp",
         "MPEG4Writer.cpp",
         "MediaAdapter.cpp",
@@ -166,12 +167,15 @@ cc_library {
         "SkipCutBuffer.cpp",
         "StagefrightMediaScanner.cpp",
         "StagefrightMetadataRetriever.cpp",
+        "SurfaceMediaSource.cpp",
         "StagefrightPluginLoader.cpp",
         "SurfaceUtils.cpp",
         "Utils.cpp",
         "ThrottledSource.cpp",
         "VideoFrameSchedulerBase.cpp",
         "VideoFrameScheduler.cpp",
+        "avc_utils_sprd.cpp",
+        "VideoPowerHint.cpp",
     ],
 
     shared_libs: [
@@ -194,6 +198,8 @@ cc_library {
         "libui",
         "libutils",
         "libmedia_helper",
+        "libprocessgroup",
+        "libsprdssense",
         "libstagefright_codecbase",
         "libstagefright_foundation",
         "libstagefright_omx_utils",
@@ -204,6 +210,7 @@ cc_library {
         "android.hidl.allocator@1.0",
         "android.hardware.cas.native@1.0",
         "android.hardware.media.omx@1.0",
+        "libpowermanager",
     ],
 
     static_libs: [

@@ -70,7 +70,7 @@ AudioSource::AudioSource(
       mNumFramesLost(0),
       mNumClientOwnedBuffers(0),
       mNoMoreFramesToRead(false) {
-    ALOGV("sampleRate: %u, outSampleRate: %u, channelCount: %u",
+    ALOGI("sampleRate: %u, outSampleRate: %u, channelCount: %u",
             sampleRate, outSampleRate, channelCount);
     CHECK(channelCount == 1 || channelCount == 2);
     CHECK(sampleRate > 0);
@@ -128,6 +128,7 @@ status_t AudioSource::initCheck() const {
 }
 
 status_t AudioSource::start(MetaData *params) {
+    ALOGI("start");
     Mutex::Autolock autoLock(mLock);
     if (mStarted) {
         return UNKNOWN_ERROR;
@@ -151,7 +152,7 @@ status_t AudioSource::start(MetaData *params) {
     } else {
         mRecord.clear();
     }
-
+    ALOGI("start  exit:%d",err);
 
     return err;
 }
@@ -167,13 +168,15 @@ void AudioSource::releaseQueuedFrames_l() {
 }
 
 void AudioSource::waitOutstandingEncodingFrames_l() {
-    ALOGV("waitOutstandingEncodingFrames_l: %" PRId64, mNumClientOwnedBuffers);
+    ALOGI("waitOutstandingEncodingFrames_l: %" PRId64, mNumClientOwnedBuffers);
     while (mNumClientOwnedBuffers > 0) {
         mFrameEncodingCompletionCondition.wait(mLock);
     }
 }
 
 status_t AudioSource::reset() {
+    ALOGI("reset");
+
     Mutex::Autolock autoLock(mLock);
     if (!mStarted) {
         return UNKNOWN_ERROR;
@@ -249,6 +252,7 @@ status_t AudioSource::read(
     *out = NULL;
 
     if (mInitCheck != OK) {
+        ALOGI("read mInitCheck failed");
         return NO_INIT;
     }
 
@@ -259,6 +263,7 @@ status_t AudioSource::read(
         }
     }
     if (!mStarted) {
+        ALOGI("read mStarted:%d line:%d",mStarted, __LINE__);
         return OK;
     }
     MediaBuffer *buffer = *mBuffersReceived.begin();
@@ -361,14 +366,14 @@ status_t AudioSource::dataCallback(const AudioRecord::Buffer& audioBuffer) {
     if (mNumFramesReceived == 0 && timeUs < mStartTimeUs) {
         (void) mRecord->getInputFramesLost();
         int64_t receievedFrames = bufferSize / mRecord->frameSize();
-        ALOGV("Drop audio data(%" PRId64 " frames) at %" PRId64 "/%" PRId64 " us",
+        ALOGD("Drop audio data(%" PRId64 " frames) at %" PRId64 "/%" PRId64 " us",
                 receievedFrames, timeUs, mStartTimeUs);
         mNumFramesSkipped += receievedFrames;
         return OK;
     }
 
     if (mStopSystemTimeUs != -1 && timeUs >= mStopSystemTimeUs) {
-        ALOGV("Drop Audio frame at %lld  stop time: %lld us",
+        ALOGD("Drop Audio frame at %lld  stop time: %lld us",
                 (long long)timeUs, (long long)mStopSystemTimeUs);
         mNoMoreFramesToRead = true;
         mFrameAvailableCondition.signal();
@@ -441,6 +446,9 @@ void AudioSource::queueInputBuffer_l(MediaBuffer *buffer, int64_t timeUs) {
                         (mSampleRate >> 1)) / mSampleRate;
     buffer->meta_data().setInt64(kKeyTime, mPrevSampleTimeUs);
     buffer->meta_data().setInt64(kKeyDriftTime, timeUs - mInitialReadTimeUs);
+    if(mPrevSampleTimeUs > timestampUs) {
+        ALOGE("error: mPrevSampleTimeUs :%zu > timestampUs:%zu",(size_t)mPrevSampleTimeUs,(size_t)timestampUs);
+    }
     mPrevSampleTimeUs = timestampUs;
     mBuffersReceived.push_back(buffer);
     mFrameAvailableCondition.signal();

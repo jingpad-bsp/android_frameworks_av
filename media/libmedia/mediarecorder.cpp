@@ -30,8 +30,15 @@
 #include <media/mediaplayer.h>  // for MEDIA_ERROR_SERVER_DIED
 #include <media/stagefright/PersistentSurface.h>
 #include <gui/IGraphicBufferProducer.h>
+#include <cutils/properties.h>
+#include <binder/IPCThreadState.h>
+
+#define SECURE_SELECTED "service.project.sec"
+#define SECURE_MEDIA_RECORDER "media.recorder"
+#define MEDIA_RECORDER_OPERATION_ID 10
 
 namespace android {
+int judge(int uid, const String16& name, int oprID, int oprType, const String16& param);
 
 status_t MediaRecorder::setCamera(const sp<hardware::ICamera>& camera,
         const sp<ICameraRecordingProxy>& proxy)
@@ -536,7 +543,28 @@ status_t MediaRecorder::start()
         ALOGE("start called in an invalid state: %d", mCurrentState);
         return INVALID_OPERATION;
     }
-
+#ifdef USE_PROJECT_SEC
+    char value[PROPERTY_VALUE_MAX] = "";//PROPERTY_VALUE_MAX 92
+    String16 param;
+    property_get(SECURE_SELECTED, value, "0");
+    if (0 == strcmp(value, "1")) {
+        int uid = IPCThreadState::self()->getCallingUid();
+        int permission = 1 ;
+        if (!mIsVideoSourceSet) {
+            permission = judge(uid, String16(SECURE_MEDIA_RECORDER), MEDIA_RECORDER_OPERATION_ID, 0, param);
+        } else {
+            ALOGD("IS video source");
+            permission = judge(uid, String16(SECURE_MEDIA_RECORDER), MEDIA_RECORDER_OPERATION_ID, 0, param);
+        }
+        if ( permission > 0) {
+            ALOGE("MediaRecorder start allow");
+        } else {
+            ALOGE("MediaRecorder start reject failed: %d", permission);
+            mCurrentState = MEDIA_RECORDER_ERROR;
+            return INVALID_OPERATION;
+        }
+    }
+#endif
     status_t ret = mMediaRecorder->start();
     if (OK != ret) {
         ALOGE("start failed: %d", ret);

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-//#define LOG_NDEBUG 0
+#define LOG_NDEBUG 0
 #define LOG_TAG "DrmManager(Native)"
 #include "utils/Log.h"
 
@@ -51,7 +51,7 @@ DrmManager::~DrmManager() {
 }
 
 int DrmManager::addUniqueId(bool isNative) {
-    Mutex::Autolock _l(mLock);
+    Mutex::Autolock _l(mIDLock);
 
     int uniqueId = -1;
     int random = rand();
@@ -76,7 +76,7 @@ int DrmManager::addUniqueId(bool isNative) {
 }
 
 void DrmManager::removeUniqueId(int uniqueId) {
-    Mutex::Autolock _l(mLock);
+    Mutex::Autolock _l(mIDLock);
     if (uniqueId & 0x1000) {
         // clear the flag for the native side.
         uniqueId &= ~(0x1000);
@@ -88,7 +88,12 @@ void DrmManager::removeUniqueId(int uniqueId) {
 }
 
 status_t DrmManager::loadPlugIns() {
+#ifdef TARGET_64
+    String8 pluginDirPath("/system/lib64/drm");
+#else
     String8 pluginDirPath("/system/lib/drm");
+#endif
+    ALOGI("DrmManager::loadPlugIns from %s", pluginDirPath.string());
     loadPlugIns(pluginDirPath);
     return DRM_NO_ERROR;
 }
@@ -98,6 +103,8 @@ status_t DrmManager::loadPlugIns(const String8& plugInDirPath) {
     Vector<String8> plugInPathList = mPlugInManager.getPlugInIdList();
     for (size_t i = 0; i < plugInPathList.size(); ++i) {
         String8 plugInPath = plugInPathList[i];
+        ALOGI("DrmManager::loadPlugIns from %s", plugInDirPath.string());
+        ALOGI("DrmManager::loadPlugIn: %s", plugInPath.string());
         DrmSupportInfo* info = mPlugInManager.getPlugIn(plugInPath).getSupportInfo(0);
         if (NULL != info) {
             if (mSupportInfoToPlugInIdMap.indexOfKey(*info) < 0) {
@@ -345,6 +352,7 @@ DrmConvertedStatus* DrmManager::convertData(
     DrmConvertedStatus *drmConvertedStatus = NULL;
 
     Mutex::Autolock _l(mConvertLock);
+    ALOGV("DrmManager::convertData: convertId = %d", convertId);
     if (mConvertSessionMap.indexOfKey(convertId) != NAME_NOT_FOUND) {
         IDrmEngine* drmEngine = mConvertSessionMap.valueFor(convertId);
         drmConvertedStatus = drmEngine->convertData(uniqueId, convertId, inputData);
@@ -360,6 +368,8 @@ DrmConvertedStatus* DrmManager::closeConvertSession(int uniqueId, int convertId)
         IDrmEngine* drmEngine = mConvertSessionMap.valueFor(convertId);
         drmConvertedStatus = drmEngine->closeConvertSession(uniqueId, convertId);
         mConvertSessionMap.removeItem(convertId);
+    } else {
+        ALOGV("DrmManager::closeConvertSession: convertId not found!");
     }
     return drmConvertedStatus;
 }

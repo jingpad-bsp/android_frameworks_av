@@ -39,6 +39,7 @@
 #include <media/stagefright/ACodec.h>
 #include <media/stagefright/AudioSource.h>
 #include <media/stagefright/AMRWriter.h>
+#include <media/stagefright/MP3Writer.h>
 #include <media/stagefright/AACWriter.h>
 #include <media/stagefright/CameraSource.h>
 #include <media/stagefright/CameraSourceTimeLapse.h>
@@ -60,9 +61,16 @@
 #include <system/audio.h>
 
 #include "ARTPWriter.h"
+#include <cutils/properties.h>
+
+#define SECURE_SELECTED "service.project.sec"
+#define SECURE_CAMERA "camera.camera"
+#define CAMERA_OPERATION_ID 8
+
+#define  AUDIO_SOURCE_RECORD_NO_AUDIO  1997
 
 namespace android {
-
+int judge(int uid, const String16& name, int oprID, int oprType, const String16& param);
 static const float kTypicalDisplayRefreshingRate = 60.f;
 // display refresh rate drops on battery saver
 static const float kMinTypicalDisplayRefreshingRate = kTypicalDisplayRefreshingRate / 2;
@@ -123,6 +131,13 @@ StagefrightRecorder::StagefrightRecorder(const String16 &opPackageName)
       mSelectedMicFieldDimension(MIC_FIELD_DIMENSION_NORMAL) {
 
     ALOGV("Constructor");
+    mIsFromCamera = false;
+    mVideoStabilizationEnable = false;
+    String8 str = good_old_string(opPackageName);
+    ALOGD("Constructor  mClientName:%s", str.string());
+    if(!strcmp(str, "com.android.camera2")){
+        mIsFromCamera = true;
+    }
 
     mAnalyticsDirty = false;
     reset();
@@ -139,6 +154,7 @@ StagefrightRecorder::~StagefrightRecorder() {
     // log the current record, provided it has some information worth recording
     // NB: this also reclaims & clears mAnalyticsItem.
     flushAndResetMetrics(false);
+    mIsFromCamera = false;
 }
 
 void StagefrightRecorder::updateMetrics() {
@@ -233,7 +249,7 @@ sp<IGraphicBufferProducer> StagefrightRecorder::querySurfaceMediaSource() const 
 status_t StagefrightRecorder::setAudioSource(audio_source_t as) {
     ALOGV("setAudioSource: %d", as);
     if (as < AUDIO_SOURCE_DEFAULT ||
-        (as >= AUDIO_SOURCE_CNT && as != AUDIO_SOURCE_FM_TUNER)) {
+        (as >= AUDIO_SOURCE_CNT && as != AUDIO_SOURCE_FM_TUNER && as != AUDIO_SOURCE_RECORD_NO_AUDIO)) {
         ALOGE("Invalid audio source: %d", as);
         return BAD_VALUE;
     }
@@ -712,6 +728,19 @@ status_t StagefrightRecorder::setParamAudioTimeScale(int32_t timeScale) {
     return OK;
 }
 
+status_t StagefrightRecorder::setParamVideoStabilizationEnable(int32_t VideoStabilizationEnable) {
+    ALOGD("setParamVideoStabilizationEnable: %d", VideoStabilizationEnable);
+
+    if(VideoStabilizationEnable == 0) {
+        mVideoStabilizationEnable = false;
+    } else if (VideoStabilizationEnable == 1) {
+        mVideoStabilizationEnable = true;
+    } else {
+        return BAD_VALUE;
+    }
+    return OK;
+}
+
 status_t StagefrightRecorder::setParamCaptureFpsEnable(int32_t captureFpsEnable) {
     ALOGV("setParamCaptureFpsEnable: %d", captureFpsEnable);
 
@@ -864,6 +893,11 @@ status_t StagefrightRecorder::setParameter(
         if (safe_strtod(value.string(), &fps)) {
             return setParamCaptureFps(fps);
         }
+    } else if (key == "video-stabilization-enable") {
+        int32_t videoStabilizationEnable;
+        if (safe_strtoi32(value.string(), &videoStabilizationEnable)) {
+            return setParamVideoStabilizationEnable(videoStabilizationEnable);
+        }
     } else {
         ALOGE("setParameter: failed to find key %s", key.string());
     }
@@ -917,6 +951,19 @@ status_t StagefrightRecorder::setClientName(const String16& clientName) {
     return OK;
 }
 
+String8 StagefrightRecorder::good_old_string(const String16& src)
+{
+    String8 name8;
+    char ch8[2];
+    ch8[1] = 0;
+    for (unsigned j = 0; j < src.size(); j++) {
+        char16_t ch = src[j];
+        if (ch < 128) ch8[0] = (char)ch;
+        name8.append(ch8);
+    }
+    return name8;
+}
+
 status_t StagefrightRecorder::prepareInternal() {
     ALOGV("prepare");
     if (mOutputFd < 0) {
@@ -958,6 +1005,10 @@ status_t StagefrightRecorder::prepareInternal() {
 
         case OUTPUT_FORMAT_OGG:
             status = setupOggRecording();
+            break;
+
+        case OUTPUT_FORMAT_MP3:
+            status = setupMP3Recording();
             break;
 
         default:
@@ -1013,6 +1064,25 @@ status_t StagefrightRecorder::start() {
             if (mOutputFormat == OUTPUT_FORMAT_WEBM) {
                 isMPEG4 = false;
             }
+            #ifdef USE_PROJECT_SEC
+            if (mVideoSource == VIDEO_SOURCE_DEFAULT
+                || mVideoSource == VIDEO_SOURCE_CAMERA) {
+                    char value[PROPERTY_VALUE_MAX] = ""; //PROPERTY_VALUE_MAX 92
+                    String16 param;
+                    property_get(SECURE_SELECTED, value, "0");
+                    if (0 == strcmp(value, "1")) {
+                        int uid = IPCThreadState::self()->getCallingUid();
+                        int permission = 1;
+                        permission = judge(uid, String16(SECURE_CAMERA), CAMERA_OPERATION_ID, 0, param);
+                        if (permission > 0) {
+                            ALOGE("StagefrightRecorder::setupMediaSource VIDEO_SOURCE_CAMERA allow");
+                        } else {
+                            ALOGE("StagefrightRecorder::setupMediaSource VIDEO_SOURCE_CAMERA reject");
+                            return OK;
+                        }
+                    }
+                }
+            #endif
             sp<MetaData> meta = new MetaData;
             setupMPEG4orWEBMMetaData(&meta);
             status = mWriter->start(meta.get());
@@ -1021,6 +1091,7 @@ status_t StagefrightRecorder::start() {
 
         case OUTPUT_FORMAT_AMR_NB:
         case OUTPUT_FORMAT_AMR_WB:
+        case OUTPUT_FORMAT_MP3:
         case OUTPUT_FORMAT_AAC_ADIF:
         case OUTPUT_FORMAT_AAC_ADTS:
         case OUTPUT_FORMAT_RTP_AVP:
@@ -1063,6 +1134,7 @@ status_t StagefrightRecorder::start() {
 
         addBatteryData(params);
     }
+    ALOGI("start exit:%d",status);
 
     return status;
 }
@@ -1115,6 +1187,9 @@ sp<MediaCodecSource> StagefrightRecorder::createAudioSource() {
             break;
         case AUDIO_ENCODER_AMR_WB:
             format->setString("mime", MEDIA_MIMETYPE_AUDIO_AMR_WB);
+            break;
+        case AUDIO_ENCODER_MP3:
+            format->setString("mime", MEDIA_MIMETYPE_AUDIO_MPEG);
             break;
         case AUDIO_ENCODER_AAC:
             format->setString("mime", MEDIA_MIMETYPE_AUDIO_AAC);
@@ -1214,6 +1289,19 @@ status_t StagefrightRecorder::setupAMRRecording() {
     }
 
     mWriter = new AMRWriter(mOutputFd);
+    return setupRawAudioRecording();
+}
+
+status_t StagefrightRecorder::setupMP3Recording() {
+    CHECK(mOutputFormat == OUTPUT_FORMAT_MP3);
+
+    if (mAudioEncoder != AUDIO_ENCODER_MP3) {
+            ALOGE("Invlaid encoder %d used for MP3 recording",
+                    mAudioEncoder);
+            return BAD_VALUE;
+        }
+
+    mWriter = new MP3Writer(mOutputFd);
     return setupRawAudioRecording();
 }
 
@@ -1728,6 +1816,14 @@ status_t StagefrightRecorder::setupVideoEncoder(
         format->setInt32("slice-height", mVideoHeight);
         format->setInt32("color-format", OMX_COLOR_FormatAndroidOpaque);
 
+        char value[PROPERTY_VALUE_MAX];
+        if ((property_get("ro.media.recoderEIS.enabled", value, "false") != 0) && !strcmp(value, "true") && mIsFromCamera) {
+            ALOGD("ro.media.recoderEIS.enabled, mVideoStabilizationEnable:%d", mVideoStabilizationEnable);
+            if(mVideoStabilizationEnable){
+               format->setInt32("record-mode",1);
+            }
+       }
+
         // set up time lapse/slow motion for surface source
         if (mCaptureFpsEnable) {
             if (!(mCaptureFps > 0.)) {
@@ -1872,7 +1968,7 @@ status_t StagefrightRecorder::setupAudioEncoder(const sp<MediaWriter>& writer) {
 status_t StagefrightRecorder::setupMPEG4orWEBMRecording() {
     mWriter.clear();
     mTotalBitRate = 0;
-
+    ALOGI("setupMPEG4orWEBMRecording");
     status_t err = OK;
     sp<MediaWriter> writer;
     sp<MPEG4Writer> mp4writer;
@@ -2130,6 +2226,7 @@ status_t StagefrightRecorder::stop() {
 
         addBatteryData(params);
     }
+    ALOGI("stop exit:%d",err);
 
     return err;
 }

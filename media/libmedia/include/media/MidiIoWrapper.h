@@ -18,6 +18,7 @@
 #define MIDI_IO_WRAPPER_H_
 
 #include <libsonivox/eas_types.h>
+#include <utils/Mutex.h>
 
 #include <media/DataSourceBase.h>
 
@@ -35,6 +36,7 @@ public:
     ~MidiIoWrapper();
 
     int readAt(void *buffer, int offset, int size);
+    int readAt_l(void *buffer, int offset, int size);
     int size();
 
     EAS_FILE_LOCATOR getLocator();
@@ -45,6 +47,10 @@ private:
     int64_t  mLength;
     DataSourceUnwrapper *mDataSource;
     EAS_FILE mEasFile;
+    unsigned char *mCacheBuffer;
+    int64_t mBufferSize;
+    static int mCachUseSize;
+    static Mutex mCacheLock;
 };
 
 

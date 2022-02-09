@@ -44,6 +44,7 @@ class MediaCodecBuffer;
 class MemoryDealer;
 struct DescribeColorFormat2Params;
 struct DataConverter;
+struct VideoPowerHintInstance;
 
 typedef hidl::allocator::V1_0::IAllocator TAllocator;
 typedef hidl::memory::V1_0::IMemory TMemory;
@@ -289,6 +290,13 @@ private:
     std::optional<uint32_t> mLatency;
 
     bool mTunneled;
+    bool mIsForWFD;
+    static bool mIsWFDRunning;
+    int64_t mFirstTimeStampUs;
+    int32_t mEstimatedFPS;
+    int32_t mFramesNumber;
+    VideoPowerHintInstance* mVideoPoewerHint;
+
 
     OMX_INDEXTYPE mDescribeColorAspectsIndex;
     OMX_INDEXTYPE mDescribeHDRStaticInfoIndex;
@@ -490,6 +498,9 @@ private:
     status_t setupFlacCodec(
             bool encoder, int32_t numChannels, int32_t sampleRate, int32_t compressionLevel,
             AudioEncoding encoding);
+
+    status_t setupmp3Codec(bool encoder,
+        int32_t sampleRate, int32_t numChannels, int32_t  bitRate);
 
     status_t setupRawAudioFormat(
             OMX_U32 portIndex, int32_t sampleRate, int32_t numChannels,

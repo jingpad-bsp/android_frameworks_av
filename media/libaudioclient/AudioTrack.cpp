@@ -37,9 +37,13 @@
 #include <media/AudioSystem.h>
 #include <media/MediaAnalyticsItem.h>
 #include <media/TypeConverter.h>
+#include <fcntl.h>
+#include <sys/prctl.h>
+#define PROCESS_NAME_MAX_SIZE 100
 
 #define WAIT_PERIOD_MS                  10
 #define WAIT_STREAM_END_TIMEOUT_SEC     120
+#define PR_SET_TIMERSLACK               29
 static const int kMaxLoopCountNotifications = 32;
 
 namespace android {
@@ -101,6 +105,20 @@ static inline float adjustSpeed(float speed, float pitch)
 static inline float adjustPitch(float pitch)
 {
     return kFixPitch ? AUDIO_TIMESTRETCH_PITCH_NORMAL : pitch;
+}
+
+
+static void getProcessName(int pid, char *buffer, size_t max) {
+    int fd;
+    snprintf(buffer, max, "/proc/%d/cmdline", pid);
+    fd = open(buffer, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        strcpy(buffer, "???");
+    } else {
+        int length = read(fd, buffer, max - 1);
+        buffer[length] = 0;
+        close(fd);
+    }
 }
 
 // static
@@ -295,7 +313,7 @@ AudioTrack::~AudioTrack()
 {
     // pull together the numbers, before we clean up our structures
     mMediaMetrics.gather(this);
-
+    ALOGD("~AudioTrack session id %d",mSessionId);
     if (mStatus == NO_ERROR) {
         // Make sure that callback function exits in the case where
         // it is looping on buffer full condition in obtainBuffer().
@@ -316,7 +334,7 @@ AudioTrack::~AudioTrack()
         mCblkMemory.clear();
         mSharedBuffer.clear();
         IPCThreadState::self()->flushCommands();
-        ALOGV("%s(%d), releasing session id %d from %d on behalf of %d",
+        ALOGI("%s(%d), releasing session id %d from %d on behalf of %d",
                 __func__, mPortId,
                 mSessionId, IPCThreadState::self()->getCallingPid(), mClientPid);
         AudioSystem::releaseAudioSessionId(mSessionId, mClientPid);
@@ -351,7 +369,7 @@ status_t AudioTrack::set(
     pid_t myPid;
 
     // Note mPortId is not valid until the track is created, so omit mPortId in ALOG for set.
-    ALOGV("%s(): streamType %d, sampleRate %u, format %#x, channelMask %#x, frameCount %zu, "
+    ALOGI("%s(): streamType %d, sampleRate %u, format %#x, channelMask %#x, frameCount %zu, "
           "flags #%x, notificationFrames %d, sessionId %d, transferType %d, uid %d, pid %d",
           __func__,
           streamType, sampleRate, format, channelMask, frameCount, flags, notificationFrames,
@@ -632,6 +650,15 @@ status_t AudioTrack::start()
     if (mState == STATE_ACTIVE) {
         return INVALID_OPERATION;
     }
+    {
+        char proc_name[PROCESS_NAME_MAX_SIZE] = {0};
+        getProcessName(getpid(),proc_name,sizeof(proc_name));
+        ALOGI("start  mClientUid:%d mClientPid:%d  mSessionId:%d app name:%s ",
+            mClientUid,
+            mClientPid,
+            mSessionId,
+            proc_name);
+    }
 
     mInUnderrun = true;
 
@@ -756,6 +783,16 @@ void AudioTrack::stop()
         return;
     }
 
+    {
+        char proc_name[PROCESS_NAME_MAX_SIZE] = {0};
+        getProcessName(getpid(),proc_name,sizeof(proc_name));
+        ALOGI("stop  mClientUid:%d mClientPid:%d  mSessionId:%d app name:%s ",
+            mClientUid,
+            mClientPid,
+            mSessionId,
+            proc_name);
+    }
+
     if (isOffloaded_l()) {
         mState = STATE_STOPPING;
     } else {
@@ -834,6 +871,7 @@ void AudioTrack::flush_l()
 
 void AudioTrack::pause()
 {
+    ALOGI("pause");
     AutoMutex lock(mLock);
     ALOGV("%s(%d): prior state:%s", __func__, mPortId, stateToString(mState));
 
@@ -1799,6 +1837,12 @@ ssize_t AudioTrack::write(const void* buffer, size_t userSize, bool blocking)
 
     size_t written = 0;
     Buffer audioBuffer;
+    SchedPolicy  mCurrentSchedulingGroup;
+    get_sched_policy(0, &mCurrentSchedulingGroup);
+    if (SP_BACKGROUND == mCurrentSchedulingGroup) {
+        ALOGD("wirte set SP_FOREGROUND");
+        set_sched_policy(0, SP_FOREGROUND);
+    }
 
     while (userSize >= mFrameSize) {
         audioBuffer.frameCount = userSize / mFrameSize;
@@ -3141,7 +3185,7 @@ void AudioTrack::DeathNotifier::binderDied(const wp<IBinder>& who __unused)
 AudioTrack::AudioTrackThread::AudioTrackThread(AudioTrack& receiver)
     : Thread(true /* bCanCallJava */)  // binder recursion on restoreTrack_l() may call Java.
     , mReceiver(receiver), mPaused(true), mPausedInt(false), mPausedNs(0LL),
-      mIgnoreNextPausedInt(false)
+      mIgnoreNextPausedInt(false), mFlagForceSetFg(false)
 {
 }
 
@@ -3166,6 +3210,17 @@ bool AudioTrack::AudioTrackThread::threadLoop()
         if (mPausedInt) {
             // TODO use futex instead of condition, for event flag "or"
             if (mPausedNs > 0) {
+                SchedPolicy scheduling = SP_DEFAULT;
+                pid_t tid = -1;
+                tid = getTid();
+                get_sched_policy(tid, &scheduling);
+                ALOGV("scheduling = %d tid = %d mFlagForceSetFg = %d", scheduling, tid, mFlagForceSetFg);
+                if (SP_BACKGROUND == scheduling && mFlagForceSetFg == false) {
+                    prctl(PR_SET_TIMERSLACK, 50000);
+                    mFlagForceSetFg = true;
+                } else if ((SP_FOREGROUND == scheduling || SP_TOP_APP == scheduling) && mFlagForceSetFg == true) {
+                    mFlagForceSetFg = false;
+                }
                 // TODO check return value and handle or log
                 (void) mMyCond.waitRelative(mMyLock, mPausedNs);
             } else {

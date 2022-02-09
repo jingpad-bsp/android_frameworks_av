@@ -22,6 +22,8 @@ cc_binary {
         "libbinder",
         "libandroidicu",
         "android.hardware.media.omx@1.0",
+        "libstagefright_omx",
+        "libstagefright",
     ],
 
     static_libs: [
@@ -31,6 +33,7 @@ cc_binary {
     include_dirs: [
         "frameworks/av/media/libmediaplayerservice",
         "frameworks/av/services/mediaresourcemanager",
+        "frameworks/native/include/media/openmax",
     ],
 
     // back to 32-bit, b/126502613

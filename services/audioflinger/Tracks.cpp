@@ -34,6 +34,9 @@
 #include <media/RecordBufferConverter.h>
 #include <mediautils/ServiceUtilities.h>
 #include <audio_utils/minifloat.h>
+#ifdef AUDIO_FW_PCM_DUMP
+#include "cutils/properties.h"
+#endif
 
 // ----------------------------------------------------------------------------
 
@@ -116,6 +119,9 @@ AudioFlinger::ThreadBase::TrackBase::TrackBase(
     // battery usage on it.
     mUid = clientUid;
 
+#ifdef AUDIO_FW_PCM_DUMP
+     pcmFile = NULL;
+#endif
     // ALOGD("Creating track with %d buffers @ %d bytes", bufferCount, bufferSize);
 
     size_t minBufferSize = buffer == NULL ? roundup(frameCount) : frameCount;
@@ -219,6 +225,39 @@ AudioFlinger::ThreadBase::TrackBase::TrackBase(
         mTee.set(sampleRate, mChannelCount, format, NBAIO_Tee::TEE_FLAG_TRACK);
 #endif
 
+#ifdef AUDIO_FW_PCM_DUMP
+        {
+            char dumpFileName[128];
+            char dump_property[128];
+            int dump_flag=0;
+            pcmFile=NULL;
+            if(property_get(AUDIO_FW_PCM_DUMP_SWITCH  , dump_property, NULL)){
+                dump_flag=strtoul(dump_property,NULL,0);
+                if(dump_flag&AUDIO_FW_PCM_DUMP_TRACKS){
+                    char dumpTime[16];
+                    struct timeval tv;
+                    struct tm tm;
+                    gettimeofday(&tv, NULL);
+                    localtime_r(&tv.tv_sec, &tm);
+                    strftime(dumpTime, sizeof(dumpTime), "%Y%m%d%H%M%S", &tm);
+                    snprintf(dumpFileName,sizeof(dumpFileName)-1,"%s/Tracks_%d_%d_%d_%d_%d_%s.pcm",
+                        AUDIO_FW_PCM_DUMP_MIXERTHREAD_PATH,mId,
+                        mUid,mSessionId,mSampleRate,mChannelCount,
+                        dumpTime);
+                    pcmFile=fopen(dumpFileName,"wb");
+                    if(pcmFile==NULL){
+                        ALOGW("create AudioTrack pcm dump file:%s failed error:%d err str:%s",
+                            dumpFileName,
+                            errno,
+                            strerror(errno));
+                    }else{
+                        ALOGI("create AudioTrack pcm dump file :%s success",
+                            dumpFileName);
+                    }
+                }
+            }
+        }
+#endif
     }
 }
 
@@ -235,6 +274,15 @@ status_t AudioFlinger::ThreadBase::TrackBase::initCheck() const
 
 AudioFlinger::ThreadBase::TrackBase::~TrackBase()
 {
+#ifdef TEE_SINK
+    dumpTee(-1, mTeeSource, mId, 'T');
+#endif
+#ifdef AUDIO_FW_PCM_DUMP
+    if(NULL!=pcmFile){
+        fclose(pcmFile);
+        pcmFile=NULL;
+    }
+#endif
     // delete the proxy before deleting the shared memory it refers to, to avoid dangling reference
     mServerProxy.clear();
     if (mCblk != NULL) {
@@ -270,6 +318,11 @@ void AudioFlinger::ThreadBase::TrackBase::releaseBuffer(AudioBufferProvider::Buf
     buf.mRaw = buffer->raw;
     buffer->frameCount = 0;
     buffer->raw = NULL;
+#ifdef AUDIO_FW_PCM_DUMP
+    if((NULL!=pcmFile) && (buf.mFrameCount >0 )){
+        fwrite(buf.mRaw, 1, buf.mFrameCount*mFrameSize, pcmFile);
+    }
+#endif
     mServerProxy->releaseBuffer(&buf);
 }
 
@@ -389,6 +442,12 @@ sp<AudioFlinger::PlaybackThread::OpPlayAudioMonitor>
 AudioFlinger::PlaybackThread::OpPlayAudioMonitor::createIfNeeded(
             uid_t uid, const audio_attributes_t& attr, int id, audio_stream_type_t streamType)
 {
+
+    if(!property_get_bool("af.media.systemready.state", false)) {
+        ALOGD("OpPlayAudio:not muting track:%d usage:%d system not ready",id, attr.usage);
+        return nullptr;
+    }
+
     if (isServiceUid(uid)) {
         Vector <String16> packages;
         getPackagesForUid(uid, packages);
@@ -442,7 +501,7 @@ bool AudioFlinger::PlaybackThread::OpPlayAudioMonitor::hasOpPlayAudio() const {
     return mHasOpPlayAudio.load();
 }
 
-// Note this method is never called (and never to be) for audio server / root track
+// Note this method is never called (and never to be) for audio server / patch record track
 // - not called from constructor due to check on UID,
 // - not called from PlayAudioOpCallback because the callback is not installed in this case
 void AudioFlinger::PlaybackThread::OpPlayAudioMonitor::checkPlayAudioForUsage()
@@ -1670,6 +1729,11 @@ ssize_t AudioFlinger::PlaybackThread::OutputTrack::write(void* data, uint32_t fr
         uint32_t outFrames = pInBuffer->frameCount > mOutBuffer.frameCount ? mOutBuffer.frameCount :
                 pInBuffer->frameCount;
         memcpy(mOutBuffer.raw, pInBuffer->raw, outFrames * mFrameSize);
+#ifdef AUDIO_FW_PCM_DUMP
+        if((NULL!=pcmFile) && (outFrames >0 )){
+            fwrite(pInBuffer->raw, 1, outFrames *mFrameSize, pcmFile);
+        }
+#endif
         Proxy::Buffer buf;
         buf.mFrameCount = outFrames;
         buf.mRaw = NULL;
@@ -1777,9 +1841,25 @@ void AudioFlinger::PlaybackThread::OutputTrack::restartIfDisabled()
     }
 }
 
+
 // ----------------------------------------------------------------------------
 #undef LOG_TAG
 #define LOG_TAG "AF::PatchTrack"
+
+status_t AudioFlinger::PlaybackThread::OutputTrack::getParameters(const String8& keys, String8 *values)
+{
+    sp<ThreadBase> thread = mThread.promote();
+    if (thread == 0) {
+        ALOGE("thread is dead");
+        return FAILED_TRANSACTION;
+    } else if (thread->type() == ThreadBase::MIXER) {
+        PlaybackThread *playbackThread = (PlaybackThread *)thread.get();
+        AudioStreamOut *output = playbackThread->getOutput();
+        return output->stream->getParameters(keys,values);
+    } else {
+        return PERMISSION_DENIED;
+    }
+}
 
 AudioFlinger::PlaybackThread::PatchTrack::PatchTrack(PlaybackThread *playbackThread,
                                                      audio_stream_type_t streamType,
@@ -1883,6 +1963,105 @@ void AudioFlinger::PlaybackThread::PatchTrack::restartIfDisabled()
 // ----------------------------------------------------------------------------
 //      Record
 // ----------------------------------------------------------------------------
+
+
+// ----------------------------------------------------------------------------
+//      AppOp for audio recording
+// -------------------------------
+
+#undef LOG_TAG
+#define LOG_TAG "AF::OpRecordAudioMonitor"
+
+// static
+sp<AudioFlinger::RecordThread::OpRecordAudioMonitor>
+AudioFlinger::RecordThread::OpRecordAudioMonitor::createIfNeeded(
+            uid_t uid, const String16& opPackageName)
+{
+    if (isServiceUid(uid)) {
+        ALOGV("not silencing record for service uid:%d pack:%s",
+                uid, String8(opPackageName).string());
+        return nullptr;
+    }
+
+    if (opPackageName.size() == 0) {
+        Vector<String16> packages;
+        // no package name, happens with SL ES clients
+        // query package manager to find one
+        PermissionController permissionController;
+        permissionController.getPackagesForUid(uid, packages);
+        if (packages.isEmpty()) {
+            return nullptr;
+        } else {
+            ALOGV("using pack:%s for uid:%d", String8(packages[0]).string(), uid);
+            return new OpRecordAudioMonitor(uid, packages[0]);
+        }
+    }
+
+    return new OpRecordAudioMonitor(uid, opPackageName);
+}
+
+AudioFlinger::RecordThread::OpRecordAudioMonitor::OpRecordAudioMonitor(
+        uid_t uid, const String16& opPackageName)
+        : mHasOpRecordAudio(true), mUid(uid), mPackage(opPackageName)
+{
+}
+
+AudioFlinger::RecordThread::OpRecordAudioMonitor::~OpRecordAudioMonitor()
+{
+    if (mOpCallback != 0) {
+        mAppOpsManager.stopWatchingMode(mOpCallback);
+    }
+    mOpCallback.clear();
+}
+
+void AudioFlinger::RecordThread::OpRecordAudioMonitor::onFirstRef()
+{
+    checkRecordAudio();
+    mOpCallback = new RecordAudioOpCallback(this);
+    ALOGV("start watching OP_RECORD_AUDIO for pack:%s", String8(mPackage).string());
+    mAppOpsManager.startWatchingMode(AppOpsManager::OP_RECORD_AUDIO, mPackage, mOpCallback);
+}
+
+bool AudioFlinger::RecordThread::OpRecordAudioMonitor::hasOpRecordAudio() const {
+    return mHasOpRecordAudio.load();
+}
+
+// Called by RecordAudioOpCallback when OP_RECORD_AUDIO is updated in AppOp callback
+// and in onFirstRef()
+// Note this method is never called (and never to be) for audio server / root track
+// due to the UID in createIfNeeded(). As a result for those record track, it's:
+// - not called from constructor,
+// - not called from RecordAudioOpCallback because the callback is not installed in this case
+void AudioFlinger::RecordThread::OpRecordAudioMonitor::checkRecordAudio()
+{
+    const int32_t mode = mAppOpsManager.checkOp(AppOpsManager::OP_RECORD_AUDIO,
+            mUid, mPackage);
+    const bool hasIt =  (mode == AppOpsManager::MODE_ALLOWED);
+    // verbose logging only log when appOp changed
+    ALOGI_IF(hasIt != mHasOpRecordAudio.load(),
+            "OP_RECORD_AUDIO missing, %ssilencing record uid%d pack:%s",
+            hasIt ? "un" : "", mUid, String8(mPackage).string());
+    mHasOpRecordAudio.store(hasIt);
+}
+
+AudioFlinger::RecordThread::OpRecordAudioMonitor::RecordAudioOpCallback::RecordAudioOpCallback(
+        const wp<OpRecordAudioMonitor>& monitor) : mMonitor(monitor)
+{ }
+
+void AudioFlinger::RecordThread::OpRecordAudioMonitor::RecordAudioOpCallback::opChanged(int32_t op,
+            const String16& packageName) {
+    UNUSED(packageName);
+    if (op != AppOpsManager::OP_RECORD_AUDIO) {
+        return;
+    }
+    sp<OpRecordAudioMonitor> monitor = mMonitor.promote();
+    if (monitor != NULL) {
+        monitor->checkRecordAudio();
+    }
+}
+
+
+
 #undef LOG_TAG
 #define LOG_TAG "AF::RecordHandle"
 
@@ -1954,6 +2133,7 @@ AudioFlinger::RecordThread::RecordTrack::RecordTrack(
             uid_t uid,
             audio_input_flags_t flags,
             track_type type,
+            const String16& opPackageName,
             audio_port_handle_t portId)
     :   TrackBase(thread, client, attr, sampleRate, format,
                   channelMask, frameCount, buffer, bufferSize, sessionId,
@@ -1967,7 +2147,8 @@ AudioFlinger::RecordThread::RecordTrack::RecordTrack(
         mResamplerBufferProvider(NULL), // initialize in case of early constructor exit
         mRecordBufferConverter(NULL),
         mFlags(flags),
-        mSilenced(false)
+        mSilenced(false),
+        mOpRecordAudioMonitor(OpRecordAudioMonitor::createIfNeeded(uid, opPackageName))
 {
     if (mCblk == NULL) {
         return;
@@ -2218,6 +2399,14 @@ void AudioFlinger::RecordThread::RecordTrack::updateTrackFrameInfo(
     mServerLatencyMs.store(latencyMs);
 }
 
+bool AudioFlinger::RecordThread::RecordTrack::isSilenced() const {
+    if (mSilenced) {
+        return true;
+    }
+    // The monitor is only created for record tracks that can be silenced.
+    return mOpRecordAudioMonitor ? !mOpRecordAudioMonitor->hasOpRecordAudio() : false;
+}
+
 status_t AudioFlinger::RecordThread::RecordTrack::getActiveMicrophones(
         std::vector<media::MicrophoneInfo>* activeMicrophones)
 {
@@ -2268,7 +2457,7 @@ AudioFlinger::RecordThread::PatchRecord::PatchRecord(RecordThread *recordThread,
                 audio_attributes_t{} /* currently unused for patch track */,
                 sampleRate, format, channelMask, frameCount,
                 buffer, bufferSize, AUDIO_SESSION_NONE, getpid(), AID_AUDIOSERVER,
-                flags, TYPE_PATCH),
+                flags, TYPE_PATCH, String16()),
         PatchTrackBase(new ClientProxy(mCblk, mBuffer, frameCount, mFrameSize, false, true),
                        *recordThread, timeout)
 {

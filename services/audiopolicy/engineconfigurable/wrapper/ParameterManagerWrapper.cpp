@@ -71,6 +71,8 @@ static const char *const gOutputDeviceCriterionName = "AvailableOutputDevices";
 static const char *const gPhoneStateCriterionName = "TelephonyMode";
 static const char *const gOutputDeviceAddressCriterionName = "AvailableOutputDevicesAddresses";
 static const char *const gInputDeviceAddressCriterionName = "AvailableInputDevicesAddresses";
+static const char *const gSprdOffloadCriterionTag = "SprdUsbmode";
+
 
 /**
  * Order MUST be align with defintiion of audio_policy_force_use_t within audio_policy.h
@@ -85,6 +87,9 @@ static const char *const gForceUseCriterionTag[AUDIO_POLICY_FORCE_USE_CNT] =
     [AUDIO_POLICY_FORCE_FOR_HDMI_SYSTEM_AUDIO] =    "ForceUseForHdmiSystemAudio",
     [AUDIO_POLICY_FORCE_FOR_ENCODED_SURROUND] =     "ForceUseForEncodedSurround",
     [AUDIO_POLICY_FORCE_FOR_VIBRATE_RINGING] =      "ForceUseForVibrateRinging"
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+    ,[AUDIO_POLICY_FORCE_FOR_FM] =                   "ForceUseForFm"
+#endif
 };
 
 template <>
@@ -308,6 +313,19 @@ status_t ParameterManagerWrapper::setAvailableOutputDevices(audio_devices_t outp
         return DEAD_OBJECT;
     }
     criterion->setCriterionState(outputDevices);
+    applyPlatformConfiguration();
+    return NO_ERROR;
+}
+
+status_t ParameterManagerWrapper::setSprdUsbMode(int mode)
+{
+    ISelectionCriterionInterface *criterion =
+            getElement<ISelectionCriterionInterface>(gSprdOffloadCriterionTag, mPolicyCriteria);
+    if (criterion == NULL) {
+        ALOGE("%s: no criterion found for %s", __FUNCTION__, gSprdOffloadCriterionTag);
+        return DEAD_OBJECT;
+    }
+    criterion->setCriterionState(mode);
     applyPlatformConfiguration();
     return NO_ERROR;
 }

@@ -440,8 +440,8 @@ protected:
                     effect_uuid_t mType;    // effect type UUID
                 };
 
-                void        acquireWakeLock();
-                virtual void acquireWakeLock_l();
+                void        acquireWakeLock(int64_t timeout = 0);
+                virtual void acquireWakeLock_l(int64_t timeout = 0);
                 void        releaseWakeLock();
                 void        releaseWakeLock_l();
                 void        updateWakeLockUids_l(const SortedVector<uid_t> &uids);
@@ -566,6 +566,10 @@ protected:
 
 #ifdef TEE_SINK
                 NBAIO_Tee               mTee;
+#endif
+
+#ifdef AUDIO_FW_PCM_DUMP
+                FILE *                     pcmFile;
 #endif
                 // ActiveTracks is a sorted vector of track type T representing the
                 // active tracks of threadLoop() to be considered by the locked prepare portion.
@@ -766,9 +770,10 @@ protected:
     virtual     void        preExit();
 
     virtual     bool        keepWakeLock() const { return true; }
-    virtual     void        acquireWakeLock_l() {
-                                ThreadBase::acquireWakeLock_l();
-                                mActiveTracks.updatePowerState(this, true /* force */);
+    virtual     void        acquireWakeLock_l(int64_t timeout = 0) {
+                                ThreadBase::acquireWakeLock_l(timeout);
+                                if (!timeout)
+                                    mActiveTracks.updatePowerState(this, true /* force */);
                             }
 
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
@@ -1189,9 +1194,9 @@ protected:
     virtual     uint32_t    suspendSleepTimeUs() const;
     virtual     void        cacheParameters_l();
 
-    virtual void acquireWakeLock_l() {
-        PlaybackThread::acquireWakeLock_l();
-        if (hasFastMixer()) {
+    virtual void acquireWakeLock_l(int64_t timeout = 0) {
+        PlaybackThread::acquireWakeLock_l(timeout);
+        if (hasFastMixer() && !timeout) {
             mFastMixer->setBoottimeOffset(
                     mTimestamp.mTimebaseOffset[ExtendedTimestamp::TIMEBASE_BOOTTIME]);
         }
@@ -1417,6 +1422,10 @@ public:
 
                 void        sendMetadataToBackend_l(
                         const StreamOutHalInterface::SourceMetadata& metadata) override;
+
+                void setIsUseAudioWhaleHal(bool enable) { useAudioWhaleHal = enable; }
+                bool isUseAudioWhaleHal() const { return useAudioWhaleHal; }
+
 protected:
     virtual     uint32_t    activeSleepTimeUs() const;
                 void        dumpInternals_l(int fd, const Vector<String16>& args) override;
@@ -1442,6 +1451,10 @@ private:
                 uint32_t    mWaitTimeMs;
     SortedVector < sp<OutputTrack> >  outputTracks;
     SortedVector < sp<OutputTrack> >  mOutputTracks;
+
+    bool startup;
+    bool useAudioWhaleHal;
+
 public:
     virtual     bool        hasFastMixer() const { return false; }
                 status_t    threadloop_getHalTimestamp_l(
@@ -1552,7 +1565,8 @@ public:
                     audio_input_flags_t *flags,
                     pid_t tid,
                     status_t *status /*non-NULL*/,
-                    audio_port_handle_t portId);
+                    audio_port_handle_t portId,
+                    const String16& opPackageName);
 
             status_t    start(RecordTrack* recordTrack,
                               AudioSystem::sync_event_t event,
@@ -1605,9 +1619,10 @@ public:
     virtual status_t    checkEffectCompatibility_l(const effect_descriptor_t *desc,
                                                    audio_session_t sessionId);
 
-    virtual void        acquireWakeLock_l() {
-                            ThreadBase::acquireWakeLock_l();
-                            mActiveTracks.updatePowerState(this, true /* force */);
+    virtual void        acquireWakeLock_l(int64_t timeout = 0) {
+                            ThreadBase::acquireWakeLock_l(timeout);
+                            if(!timeout)
+                                mActiveTracks.updatePowerState(this, true /* force */);
                         }
     virtual bool        isOutput() const override { return false; }
 

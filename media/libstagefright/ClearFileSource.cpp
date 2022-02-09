@@ -33,6 +33,7 @@ ClearFileSource::ClearFileSource(const char *filename)
     : mFd(-1),
       mOffset(0),
       mLength(-1),
+      mContainerBasedDrmLength(-1),
       mName("<null>") {
 
     if (filename) {
@@ -52,6 +53,7 @@ ClearFileSource::ClearFileSource(int fd, int64_t offset, int64_t length)
     : mFd(fd),
       mOffset(offset),
       mLength(length),
+      mContainerBasedDrmLength(-1),
       mName("<null>") {
     ALOGV("fd=%d (%s), offset=%lld, length=%lld",
             fd, nameForFd(fd).c_str(), (long long) offset, (long long) length);

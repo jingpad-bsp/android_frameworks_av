@@ -182,9 +182,12 @@ PlaylistFetcher::PlaylistFetcher(
 
     memset(mKeyData, 0, sizeof(mKeyData));
     memset(mAESInitVec, 0, sizeof(mAESInitVec));
+
+    init();
 }
 
 PlaylistFetcher::~PlaylistFetcher() {
+    deinit();
 }
 
 int32_t PlaylistFetcher::getFetcherID() const {
@@ -1741,6 +1744,10 @@ status_t PlaylistFetcher::extractAndQueueAccessUnitsFromTs(const sp<ABuffer> &bu
     size_t offset = 0;
     while (offset + 188 <= buffer->size()) {
         status_t err = mTSParser->feedTSPacket(buffer->data() + offset, 188);
+
+        if(mDumpTsEnabled && mFileDump != NULL) {
+            fwrite(buffer->data() + offset, 1, 188, mFileDump);
+        }
 
         if (err != OK) {
             return err;

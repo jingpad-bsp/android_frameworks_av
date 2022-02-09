@@ -773,7 +773,8 @@ const sp<IAudioPolicyService> AudioSystem::get_audio_policy_service()
     if (apc != 0) {
         int64_t token = IPCThreadState::self()->clearCallingIdentity();
         ap->registerClient(apc);
-        ap->setAudioPortCallbacksEnabled(apc->isAudioPortCbEnabled());
+	if(apc->isAudioPortCbEnabled())
+            ap->setAudioPortCallbacksEnabled(apc->isAudioPortCbEnabled());
         ap->setAudioVolumeGroupCallbacksEnabled(apc->isAudioVolumeGroupCbEnabled());
         IPCThreadState::self()->restoreCallingIdentity(token);
     }

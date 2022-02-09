@@ -24,6 +24,7 @@
 #include <binder/IServiceManager.h>
 #include <utils/Log.h>
 #include "RegisterExtensions.h"
+#include <media/stagefright/MediaCodecList.h>
 
 // from LOCAL_C_INCLUDES
 #include "MediaPlayerService.h"
@@ -40,6 +41,7 @@ int main(int argc __unused, char **argv __unused)
     ALOGI("ServiceManager: %p", sm.get());
     AIcu_initializeIcuOrDie();
     MediaPlayerService::instantiate();
+    MediaCodecList::getLocalInstance();  // add by sprd ,  the bootanimation sound delay too much because of this function
     ResourceManagerService::instantiate();
     registerExtensions();
     ProcessState::self()->startThreadPool();

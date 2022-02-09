@@ -339,6 +339,8 @@ public:
                             return timestamp;
                         }
 
+    status_t getParameters(const String8& keys, String8 *values);
+
 private:
     status_t            obtainBuffer(AudioBufferProvider::Buffer* buffer,
                                      uint32_t waitTimeMs);

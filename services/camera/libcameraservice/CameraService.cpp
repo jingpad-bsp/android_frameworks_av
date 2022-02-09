@@ -75,6 +75,8 @@
 #include "utils/CameraTraces.h"
 #include "utils/TagMonitor.h"
 #include "utils/CameraThreadState.h"
+// SPRD
+#include "common/CameraProviderManagerEx.h"
 
 namespace {
     const char* kPermissionServiceName = "permission";
@@ -130,7 +132,7 @@ sp<hardware::ICameraServiceProxy> CameraService::sCameraServiceProxy;
 CameraService::CameraService() :
         mEventLog(DEFAULT_EVENT_LOG_LENGTH),
         mNumberOfCameras(0),
-        mSoundRef(0), mInitialized(false) {
+        mSoundRef(0), mInitialized(false), mMultiCameraInUse(false){
     ALOGI("CameraService started (pid=%d)", getpid());
     mServiceLockWrapper = std::make_shared<WaitableMutexWrapper>(&mServiceLock);
 }
@@ -329,7 +331,7 @@ void CameraService::onDeviceStatusChanged(const String8& id,
 
     StatusInternal oldStatus = state->getStatus();
 
-    if (oldStatus == newStatus) {
+    if (oldStatus == newStatus && (!isSprdMultiCamera(atoi(id)))) {
         ALOGE("%s: State transition to the same status %#x not allowed", __FUNCTION__, newStatus);
         return;
     }
@@ -468,7 +470,7 @@ Status CameraService::getCameraInfo(int cameraId,
                 "Camera subsystem is not available");
     }
 
-    if (cameraId < 0 || cameraId >= mNumberOfCameras) {
+    if (cameraId < 0 || (!isSprdMultiCamera(cameraId) && (cameraId >= mNumberOfCameras))) {
         return STATUS_ERROR(ERROR_ILLEGAL_ARGUMENT,
                 "CameraId is not valid");
     }
@@ -889,6 +891,11 @@ static status_t getUidForPackage(String16 packageName, int userId, /*inout*/uid_
     return NO_ERROR;
 }
 
+// UNISOC: add systemui special for facelock feature
+static bool isSpecialModeForFaceLock(const String8& clientName8) {
+    return strcmp("com.android.systemui", clientName8.string()) == 0;
+}
+
 Status CameraService::validateConnectLocked(const String8& cameraId,
         const String8& clientName8, /*inout*/int& clientUid, /*inout*/int& clientPid,
         /*out*/int& originalClientPid) const {
@@ -1007,8 +1014,9 @@ Status CameraService::validateClientPermissionsLocked(const String8& cameraId,
 
     // Only allow clients who are being used by the current foreground device user, unless calling
     // from our own process OR the caller is using the cameraserver's HIDL interface.
+    // UNISOC: fix for facelock feature
     if (!hardware::IPCThreadState::self()->isServingCall() && callingPid != getpid() &&
-            (mAllowedUsers.find(clientUserId) == mAllowedUsers.end())) {
+            (mAllowedUsers.find(clientUserId) == mAllowedUsers.end()) && !isSpecialModeForFaceLock(clientName8)) {
         ALOGE("CameraService::connect X (PID %d) rejected (cannot connect from "
                 "device user %d, currently allowed device users: %s)", callingPid, clientUserId,
                 toString(mAllowedUsers).string());
@@ -1386,7 +1394,13 @@ Status CameraService::connectHelper(const sp<CALLBACK>& cameraCb, const String8&
         return STATUS_ERROR_FMT(ERROR_DISCONNECTED,
                                 "No camera device with ID \"%s\" currently available",
                                 cameraId.string());
-
+    }
+    //make mutual exclusion for single camera id and multi-camera id
+    int count = 100;
+    while (count > 0 && mMultiCameraInUse){
+        usleep(30 * 1000);//sleep 30ms;
+        count --;
+        ALOGV("Multi-Camera is in use,wait it to be released.Wait time : %dms",(100 - count) * 30);
     }
     sp<CLIENT> client = nullptr;
     {
@@ -2011,6 +2025,17 @@ std::shared_ptr<CameraService::CameraState> CameraService::getCameraState(
         const String8& cameraId) const {
     std::shared_ptr<CameraState> state;
     {
+                // SPRD
+        if(isSprdMultiCamera(atoi(cameraId.string()))) {
+            String8 fakeCameraId = cameraId;
+            fakeCameraId = String8::format("%d",
+                           getMainCamIdForMultiCamId(atoi(cameraId.string())));
+            auto iter = mCameraStates.find(fakeCameraId);
+            if (iter != mCameraStates.end()) {
+                state = iter->second;
+            }
+            return state;
+        }
         Mutex::Autolock lock(mCameraStatesLock);
         auto iter = mCameraStates.find(cameraId);
         if (iter != mCameraStates.end()) {
@@ -3262,12 +3287,22 @@ void CameraService::updateStatus(StatusInternal status, const String8& cameraId,
             Mutex::Autolock lock(mStatusListenerLock);
 
             for (auto& listener : mListenerList) {
+                //make mutual exclusion for single camera id and multi-camera id
+                if(isSprdMultiCamera(atoi(cameraId))){
+                    if((atoi(cameraId) == SPRD_SINGLE_FACEID_UNLOCK_ID)||
+                        (atoi(cameraId) == SPRD_DUAL_FACEID_UNLOCK_ID)||
+                        (atoi(cameraId) == SPRD_3D_FACEID_UNLOCK_ID)){
+                         mMultiCameraInUse = (status == StatusInternal::PRESENT) ? false : true;
+                         ALOGV("mMultiCameraInUse = %s",mMultiCameraInUse ? "true" : "false");
+                    }
+                }
                 if (!listener.first &&
                     mCameraProviderManager->isPublicallyHiddenSecureCamera(cameraId.c_str())) {
                     ALOGV("Skipping camera discovery callback for system-only camera %s",
                           cameraId.c_str());
                     continue;
                 }
+
                 listener.second->getListener()->onStatusChanged(mapToInterface(status),
                         String16(cameraId));
             }
@@ -3283,7 +3318,7 @@ void CameraService::CameraState::updateStatus(StatusInternal status,
     StatusInternal oldStatus = mStatus;
     mStatus = status;
 
-    if (oldStatus == status) {
+ if ((oldStatus == status) && (!isSprdMultiCamera(atoi(cameraId)))) {
         return;
     }
 

@@ -681,14 +681,14 @@ uint32_t MyOpusExtractor::getNumSamplesInPacket(MediaBufferHelper *buffer) const
         if (buffer->range_length() < 3) {
             numFrames = 0;
         } else {
-            numFrames = data[2] & 0x3f;
+            numFrames = data[1] & 0x3f;
         }
         break;
     default:
         TRESPASS();
     }
 
-    uint32_t numSamples = (uint32_t)((uint64_t)frameSizeUs * numFrames * kOpusSampleRate) / 1000000;
+    uint32_t numSamples = (uint32_t)(((uint64_t)frameSizeUs * numFrames * kOpusSampleRate) / 1000000);
     return numSamples;
 }
 

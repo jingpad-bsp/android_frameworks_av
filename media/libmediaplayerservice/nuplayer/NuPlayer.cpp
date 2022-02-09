@@ -187,6 +187,7 @@ NuPlayer::NuPlayer(pid_t pid, const sp<MediaClock> &mediaClock)
       mPreviousSeekTimeUs(0),
       mAudioEOS(false),
       mVideoEOS(false),
+      //mSourceEOS(false),
       mScanSourcesPending(false),
       mScanSourcesGeneration(0),
       mPollDurationGeneration(0),
@@ -1271,6 +1272,7 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
 
                 if ((mAudioEOS || mAudioDecoder == NULL)
                         && (mVideoEOS || mVideoDecoder == NULL)) {
+                        mSource->complete();
                     notifyListener(MEDIA_PLAYBACK_COMPLETE, 0, 0);
                 }
             } else if (what == Renderer::kWhatFlushComplete) {
@@ -1969,6 +1971,9 @@ status_t NuPlayer::instantiateDecoder(
                 notify, mSource, mPID, mUID, mRenderer, mSurface, mCCDecoder);
         mVideoDecoderError = false;
 
+        AString SceneMode = "AFBC";
+        format->setString("scene-mode", SceneMode);
+
         // enable FRC if high-quality AV sync is requested, even if not
         // directly queuing to display, as this will even improve textureview
         // playback.
@@ -1986,6 +1991,20 @@ status_t NuPlayer::instantiateDecoder(
         ALOGV("instantiateDecoder: mCrypto: %p (%d) isSecure: %d", mCrypto.get(),
                 (mCrypto != NULL ? mCrypto->getStrongCount() : 0),
                 (mSourceFlags & Source::FLAG_SECURE) != 0);
+    }
+
+    AString mime;
+    if (audio && format->findString("mime", &mime) && !strcmp(mime.c_str(),"audio/g711-alaw")) {
+        int channelMask,channelCount;
+        if (format->findInt32("channel-mask", &channelMask) && format->findInt32("channel-count", &channelCount)
+            && (channelMask == CHANNEL_MASK_USE_CHANNEL_ORDER) ) {
+            channelMask = audio_channel_out_mask_from_count(channelCount);
+            if (0 == channelMask) {
+                ALOGE("Both the audio channel and the mask are malformed");
+            } else {
+                format->setInt32("channel-mask", channelMask);
+            }
+        }
     }
 
     (*decoder)->configure(format);
@@ -2053,10 +2072,11 @@ void NuPlayer::updateVideoSize(
              displayHeight,
              cropLeft, cropTop);
     } else {
-        CHECK(inputFormat->findInt32("width", &displayWidth));
-        CHECK(inputFormat->findInt32("height", &displayHeight));
-
-        ALOGV("Video input format %d x %d", displayWidth, displayHeight);
+        if (inputFormat->findInt32("width", &displayWidth) && inputFormat->findInt32("height", &displayHeight)) {
+            ALOGV("Video input format %d x %d", displayWidth, displayHeight);
+        } else {
+            return;
+        }
     }
 
     // Take into account sample aspect ratio if necessary:
@@ -2309,6 +2329,11 @@ void NuPlayer::processDeferredActions() {
     }
 }
 
+void NuPlayer::setNeedConsume(bool needConsume)
+{
+    mSource->setNeedConsume(needConsume);
+}
+
 void NuPlayer::performSeek(int64_t seekTimeUs, MediaPlayerSeekMode mode) {
     ALOGV("performSeek seekTimeUs=%lld us (%.2f secs), mode=%d",
           (long long)seekTimeUs, seekTimeUs / 1E6, mode);
@@ -2454,7 +2479,11 @@ void NuPlayer::performResumeDecoders(bool needNotify) {
 void NuPlayer::finishResume() {
     if (mResumePending) {
         mResumePending = false;
-        notifyDriverSeekComplete();
+        if (mDataSourceType != DATA_SOURCE_TYPE_RTSP) {
+            notifyDriverSeekComplete();
+        } else {
+            ALOGI("rtsp streaming not notify seek complete when decoders resumed");
+        }
     }
 }
 
@@ -2710,6 +2739,20 @@ void NuPlayer::onSourceNotify(const sp<AMessage> &msg) {
         case Source::kWhatDrmNoLicense:
         {
             notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, ERROR_DRM_NO_LICENSE);
+            break;
+        }
+
+        case Source::kWhatSeekDone:
+        {
+            if (mDataSourceType == DATA_SOURCE_TYPE_RTSP) {
+                if (mDriver != NULL) {
+                    sp<NuPlayerDriver> driver = mDriver.promote();
+                    if (driver != NULL) {
+                        driver->notifySeekComplete();
+                    }
+                }
+                ALOGI("rtsp streaming notify NuPlayerDriver seek complete");
+            }
             break;
         }
 

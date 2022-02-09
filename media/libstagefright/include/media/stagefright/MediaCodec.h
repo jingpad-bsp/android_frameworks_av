@@ -29,6 +29,8 @@
 #include <media/stagefright/foundation/AHandler.h>
 #include <media/stagefright/FrameRenderTracker.h>
 #include <utils/Vector.h>
+#include <sprdssense/ISSense.h>
+#include <sprdssense/SSense.h>
 
 namespace android {
 
@@ -88,6 +90,8 @@ struct MediaCodec : public AHandler {
             pid_t pid = kNoPid, uid_t uid = kNoUid);
 
     static sp<PersistentSurface> CreatePersistentInputSurface();
+
+    static void getProcessName(int pid, char *buffer, size_t max);
 
     status_t configure(
             const sp<AMessage> &format,
@@ -376,6 +380,9 @@ private:
     bool mCpuBoostRequested;
 
     std::shared_ptr<BufferChannelBase> mBufferChannel;
+
+    sp<ISSense> mSSense;
+    bool mStartNotified;
 
     MediaCodec(const sp<ALooper> &looper, pid_t pid, uid_t uid);
 

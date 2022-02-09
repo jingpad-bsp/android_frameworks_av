@@ -59,6 +59,11 @@
 #define FALLTHROUGH_INTENDED [[clang::fallthrough]]  // NOLINT
 #endif
 
+/** SPRD: support 3GPP Bitrate-Adaptation @{*/
+#define MAX_SOCKET_BUFFER_SIZE        (16*1024)
+#define MIN_RTP_SOCKET_MEM_POOL_SIZE_IN_BYTES      (8 * MAX_SOCKET_BUFFER_SIZE)
+/** SPRD:  @}*/
+
 // If no access units are received within 5 secs, assume that the rtp
 // stream has ended and signal end of stream.
 static int64_t kAccessUnitTimeoutUs = 10000000ll;
@@ -177,10 +182,11 @@ struct MyHandler : public AHandler {
         }
 
         mSessionHost = host;
+        init();
     }
 
     void connect() {
-        looper()->registerHandler(mConn);
+        mRTSPNetLooper->registerHandler(mConn);
         (1 ? mNetLooper : looper())->registerHandler(mRTPConn);
 
         sp<AMessage> notify = new AMessage('biny', this);
@@ -191,7 +197,7 @@ struct MyHandler : public AHandler {
     }
 
     void loadSDP(const sp<ASessionDescription>& desc) {
-        looper()->registerHandler(mConn);
+        mRTSPNetLooper->registerHandler(mConn);
         (1 ? mNetLooper : looper())->registerHandler(mRTPConn);
 
         sp<AMessage> notify = new AMessage('biny', this);
@@ -224,6 +230,7 @@ struct MyHandler : public AHandler {
     }
 
     void disconnect() {
+        mExited = true;
         (new AMessage('abor', this))->post();
     }
 
@@ -590,7 +597,7 @@ struct MyHandler : public AHandler {
                             }
 
                             mControlURL = getControlURL();
-
+                            parseNTPRange();
                             if (mSessionDesc->countTracks() < 2) {
                                 // There's no actual tracks in this session.
                                 // The first "track" is merely session meta
@@ -788,6 +795,13 @@ struct MyHandler : public AHandler {
                     request.append(mSessionID);
                     request.append("\r\n");
 
+                    if (mSdpHasRange) {
+                        if (mNptEnd == mNptStart) {
+                            request.append(AStringPrintf("Range: npt=%f-\r\n", mNptStart));
+                        } else {
+                            request.append(AStringPrintf("Range: npt=%f-%f\r\n", mNptStart, mNptEnd));
+                        }
+                    }
                     request.append("\r\n");
 
                     sp<AMessage> reply = new AMessage('play', this);
@@ -896,6 +910,8 @@ struct MyHandler : public AHandler {
 
                         close(info->mRTPSocket);
                         close(info->mRTCPSocket);
+                    } else {
+                        mConn->setTearDownFlag(true);
                     }
                 }
                 mTracks.clear();
@@ -910,12 +926,19 @@ struct MyHandler : public AHandler {
                 mReceivedFirstRTPPacket = false;
                 mPausing = false;
                 mSeekable = true;
+                mSdpHasRange = false;
+                mNptStart = 0.0;
+                mNptEnd = 0.0;
+                mHaveVideo = false;
+                mHaveAudio = false;
+                bool reconnectFlag = false;
 
                 sp<AMessage> reply = new AMessage('tear', this);
 
                 int32_t reconnect;
                 if (msg->findInt32("reconnect", &reconnect) && reconnect) {
                     reply->setInt32("reconnect", true);
+                    reconnectFlag = true;
                 }
 
                 AString request;
@@ -933,18 +956,23 @@ struct MyHandler : public AHandler {
 
                 mConn->sendRequest(request.c_str(), reply);
 
-                // If the response of teardown hasn't been received in 3 seconds,
-                // post 'tear' message to avoid ANR.
-                if (!msg->findInt32("reconnect", &reconnect) || !reconnect) {
-                    sp<AMessage> teardown = reply->dup();
-                    teardown->setInt32("result", -ECONNABORTED);
-                    teardown->post(kTearDownTimeoutUs);
+                //Add timeout for TEARDOWN to avoid ANR
+                sp<AMessage> timeout = new AMessage('tdto', this);
+                if (reconnectFlag) {
+                    timeout->setInt32("reconnect", true);
                 }
+                timeout->post(kTearDownTimeoutUs);
+                mIsTeardownFinished = false;
                 break;
             }
 
             case 'tear':
             {
+               if (mIsTeardownFinished) {
+                    ALOGW("tear already finish teardown, break directly.");
+                    break;
+                }
+
                 int32_t result;
                 CHECK(msg->findInt32("result", &result));
 
@@ -955,12 +983,23 @@ struct MyHandler : public AHandler {
 
                 int32_t reconnect;
                 if (msg->findInt32("reconnect", &reconnect) && reconnect) {
-                    reply->setInt32("reconnect", true);
+                    if (!mExited) {
+                        reply->setInt32("reconnect", true);
+                    } else {
+                        ALOGI("tear: no need to reconnect when stop playing");
+                    }
                 }
 
                 mConn->disconnect(reply);
+
+                mIsTeardownFinished = true;
+                mConn->setTearDownFlag(false);
                 break;
             }
+
+            case 'tdto':
+                tearDownTimeout(msg);
+                break;
 
             case 'quit':
             {
@@ -1468,10 +1507,15 @@ struct MyHandler : public AHandler {
 
         float npt1, npt2;
         if (!ASessionDescription::parseNTPRange(val.c_str(), &npt1, &npt2)) {
-            // This is a live stream and therefore not seekable.
+            ALOGI("parsePlayResponse: further confirm the streaming type through mSeekable");
+            if (mSeekable) {
+                ALOGI("This is a on-demand stream");
+            } else {
+                // This is a live stream and therefore not seekable.
 
-            ALOGI("This is a live stream");
-            return;
+                ALOGI("This is a live stream");
+                return;
+            }
         }
 
         i = response->mHeaders.indexOfKey("rtp-info");
@@ -1605,6 +1649,8 @@ private:
 
     bool mPlayResponseParsed;
 
+#include "MyHandlerEx.h"
+
     void setupTrack(size_t index) {
         sp<APacketSource> source =
             new APacketSource(mSessionDesc, index);
@@ -1617,6 +1663,9 @@ private:
             reply->setInt32("result", ERROR_UNSUPPORTED);
             reply->post();
             return;
+        } else {
+            if (skipMultiStreams(source, index))
+                return;
         }
 
         AString url;
@@ -1696,7 +1745,7 @@ private:
             request.append(mSessionID);
             request.append("\r\n");
         }
-
+        appendBitrateAdap(request, index, trackURL);
         request.append("\r\n");
 
         sp<AMessage> reply = new AMessage('setu', this);
@@ -1953,6 +2002,9 @@ private:
     }
 
     void postQueueSeekDiscontinuity(size_t trackIndex) {
+        flushPackets(trackIndex);
+        ALOGI("postQueueSeekDiscontinuity flush track %d complete", (int)trackIndex);
+
         sp<AMessage> msg = mNotify->dup();
         msg->setInt32("what", kWhatSeekDiscontinuity);
         msg->setSize("trackIndex", trackIndex);

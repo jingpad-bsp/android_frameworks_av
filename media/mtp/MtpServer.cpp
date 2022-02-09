@@ -954,7 +954,7 @@ MtpResponseCode MtpServer::doSendObjectInfo() {
     if (!mData.getString(created)) return MTP_RESPONSE_INVALID_PARAMETER;      // date created
     if (!mData.getString(modified)) return MTP_RESPONSE_INVALID_PARAMETER;     // date modified
     // keywords follow
-
+    name.trim();
     ALOGV("name: %s format: 0x%04X (%s)\n", (const char*)name, format,
           MtpDebug::getFormatCodeName(format));
     time_t modifiedTime;

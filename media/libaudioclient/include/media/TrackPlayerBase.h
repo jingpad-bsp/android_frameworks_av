@@ -55,6 +55,7 @@ private:
 
     // volume coming from the player volume API
     float mPlayerVolumeL, mPlayerVolumeR;
+    Mutex mAudioTrackLock;
 };
 
 } // namespace android

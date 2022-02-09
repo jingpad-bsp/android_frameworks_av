@@ -30,6 +30,7 @@
 #include "DrmManager.h"
 
 #include <selinux/android.h>
+#include <cutils/properties.h>
 
 using namespace android;
 
@@ -87,17 +88,24 @@ bool DrmManagerService::isProtectedCallAllowed(drm_perm_t perm) {
     // TODO
     // Following implementation is just for reference.
     // Each OEM manufacturer should implement/replace with their own solutions.
-    IPCThreadState* ipcState = IPCThreadState::self();
-    uid_t uid = ipcState->getCallingUid();
-    pid_t spid = ipcState->getCallingPid();
-    const char* ssid = ipcState->getCallingSid();
+    char value[PROPERTY_VALUE_MAX];
+    if ((property_get("drm.service.enabled", value, NULL) == 0) || (!(strcmp(value, "false")) || !(strcmp(value, "disable")))) {
 
-    for (unsigned int i = 0; i < trustedUids.size(); ++i) {
-        if (trustedUids[i] == uid) {
-            return selinuxIsProtectedCallAllowed(spid, ssid, perm);
+        IPCThreadState* ipcState = IPCThreadState::self();
+        uid_t uid = ipcState->getCallingUid();
+        pid_t spid = ipcState->getCallingPid();
+        const char* ssid = ipcState->getCallingSid();
+
+        for (unsigned int i = 0; i < trustedUids.size(); ++i) {
+            if (trustedUids[i] == uid) {
+                return selinuxIsProtectedCallAllowed(spid, ssid, perm);
+            }
         }
+        return false;
+    } else {
+        // drm.service.enabled is true,support drm for this device
+        return true;
     }
-    return false;
 }
 
 void DrmManagerService::instantiate() {

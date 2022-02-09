@@ -41,6 +41,10 @@ def parseArgs():
     argparser = argparse.ArgumentParser(description="Parameter-Framework XML \
         Settings file generator.\n\
         Exit with the number of (recoverable or not) error that occured.")
+    argparser.add_argument('--tool',
+            help="domainGeneratorConnector tool",
+            metavar="TOOL",
+            required=True)
     argparser.add_argument('--toplevel-config',
             help="Top-level parameter-framework configuration file. Mandatory.",
             metavar="TOPLEVEL_CONFIG_FILE",
@@ -237,11 +241,10 @@ def main():
             outfile=fake_toplevel_config,
             structPath=install_path)
     fake_toplevel_config.close()
-
     # Create the connector. Pipe its input to us in order to write commands;
     # connect its output to stdout in order to have it dump the domains
     # there; connect its error output to stderr.
-    connector = subprocess.Popen(["domainGeneratorConnector",
+    connector = subprocess.Popen([args.tool,
                             fake_toplevel_config.name,
                             'verbose' if args.verbose else 'no-verbose',
                             'validate' if args.validate else 'no-validate',

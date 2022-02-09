@@ -384,7 +384,7 @@ status_t AudioPolicyService::getInputForAttr(const audio_attributes_t *attr,
         return PERMISSION_DENIED;
     }
 
-    bool canCaptureOutput = captureAudioOutputAllowed(pid, uid);
+    bool canCaptureOutput = captureAudioOutputAllowed(opPackageName,pid, uid);
     if ((attr->source == AUDIO_SOURCE_VOICE_UPLINK ||
         attr->source == AUDIO_SOURCE_VOICE_DOWNLINK ||
         attr->source == AUDIO_SOURCE_VOICE_CALL ||

@@ -72,6 +72,7 @@ private:
     size_t mCurrentSampleSize;
     uint64_t mCurrentSampleTime;
     uint64_t mCurrentSampleDuration;
+    uint32_t mCurSimpleSizeIndex;
 
     void reset();
     status_t findChunkRange(uint32_t sampleIndex);

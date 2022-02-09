@@ -25,6 +25,7 @@
 #include <system/audio.h>
 #include <cutils/config_utils.h>
 #include <string>
+#include <cutils/properties.h>
 
 namespace android {
 
@@ -163,6 +164,14 @@ public:
                                              bool allowToCreate = false,
                                              bool matchAddress = true) const;
 
+    sp<DeviceDescriptor> getDeviceDescriptor(const audio_devices_t type,
+                                             const char *address,
+                                             const char *name,
+                                             audio_format_t encodedFormat,
+                                             int custom_config,
+                                             bool allowToCreate = false,
+                                             bool matchAddress = true) const;
+
     /**
      * @brief createDevice creates a new device from the type and address given. It checks that
      * according to the device type, a module is supporting this device (weak check).
@@ -178,6 +187,12 @@ public:
                                       const char *name,
                                       const audio_format_t encodedFormat) const;
 
+    sp<DeviceDescriptor> createDevice(const audio_devices_t type,
+                                      const char *address,
+                                      const char *name,
+                                      const audio_format_t encodedFormat,
+                                      int custom_config) const;
+
     /**
      * @brief cleanUpForDevice: loop on all profiles of all modules to remove device from
      * the list of supported device. If this device is a dynamic device (aka a device not in the
@@ -188,6 +203,7 @@ public:
     void cleanUpForDevice(const sp<DeviceDescriptor> &device);
 
     void dump(String8 *dst) const;
+
 };
 
 } // namespace android

@@ -31,8 +31,14 @@
 
 #include <gui/IGraphicBufferProducer.h>
 #include <gui/Surface.h>
+#include <cutils/properties.h>
+
+#define SECURE_SELECTED "service.project.sec"
+#define SECURE_CAMERA "camera.camera"
+#define CAMERA_OPERATION_ID 8
 
 namespace android {
+int judge(int uid, const String16& name, int oprID, int oprType, const String16& param);
 
 Camera::Camera(int cameraId)
     : CameraBase(cameraId)
@@ -175,12 +181,36 @@ status_t Camera::setVideoTarget(const sp<IGraphicBufferProducer>& bufferProducer
     return c->setVideoTarget(bufferProducer);
 }
 
+int cameraDoJudge()
+{
+    int permission = 1;
+    #ifdef USE_PROJECT_SEC
+    char value[PROPERTY_VALUE_MAX] = "";
+    String16 param;
+    property_get(SECURE_SELECTED, value, "0");
+    if (0 == strcmp(value, "1")) {
+        int uid =IPCThreadState::self()->getCallingUid();
+        permission = judge(uid, String16(SECURE_CAMERA), CAMERA_OPERATION_ID, 0, param);
+    }
+    if ( permission > 0) {
+        ALOGE("Camera:setPreviewDisplay allow");
+    } else {
+        ALOGE("Camera:setPreviewDisplay reject");
+    }
+    #endif
+    return permission;
+}
+
 // start preview mode
 status_t Camera::startPreview()
 {
     ALOGV("startPreview");
     sp <::android::hardware::ICamera> c = mCamera;
     if (c == 0) return NO_INIT;
+    int permission = cameraDoJudge();
+    if (permission < 0) {
+        return INVALID_OPERATION;
+    }
     return c->startPreview();
 }
 

@@ -17,6 +17,7 @@ cc_library_shared {
         "-Wall",
         "-Werror",
         "-Wextra",
+        "-DSPRD_CUSTOM_AUDIO_POLICY",
     ],
     local_include_dirs: ["include"],
     header_libs: [

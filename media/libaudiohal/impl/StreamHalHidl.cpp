@@ -28,6 +28,8 @@
 #include "StreamHalHidl.h"
 #include "VersionUtils.h"
 
+#include <binder/IServiceManager.h>
+
 using ::android::hardware::MQDescriptorSync;
 using ::android::hardware::Return;
 using ::android::hardware::Void;
@@ -229,6 +231,14 @@ bool StreamHalHidl::requestHalThreadPriority(pid_t threadPid, pid_t threadId) {
     if (mHalThreadPriority == HAL_THREAD_PRIORITY_DEFAULT) {
         return true;
     }
+
+    //SPRD_ADD_START sprd add for boot ringtone
+    sp<IBinder> binder = defaultServiceManager()->checkService(String16("scheduling_policy"));
+    if (binder == 0) {
+        return false;
+    }
+    //SPRD_ADD_END
+
     int err = requestPriority(
             threadPid, threadId,
             mHalThreadPriority, false /*isForApp*/, true /*asynchronous*/);

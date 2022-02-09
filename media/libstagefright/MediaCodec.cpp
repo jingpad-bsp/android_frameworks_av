@@ -15,6 +15,8 @@
  */
 
 //#define LOG_NDEBUG 0
+#define PROCESS_NAME_MAX_SIZE 100
+
 #define LOG_TAG "MediaCodec"
 #include <utils/Log.h>
 
@@ -60,6 +62,10 @@
 #include <mediautils/BatteryNotifier.h>
 #include <private/android_filesystem_config.h>
 #include <utils/Singleton.h>
+
+#include <binder/ProcessState.h>
+#include <sys/resource.h>
+#include <utils/threads.h>
 
 namespace android {
 
@@ -434,10 +440,28 @@ void CodecCallback::onOutputBuffersChanged() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+ void MediaCodec::getProcessName(int pid, char *buffer, size_t max) {
+    int fd;
+    snprintf(buffer, max, "/proc/%d/cmdline", pid);
+    fd = open(buffer, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        strcpy(buffer, "???");
+    } else {
+        int length = read(fd, buffer, max - 1);
+        buffer[length] = 0;
+        close(fd);
+    }
+}
+
 // static
 sp<MediaCodec> MediaCodec::CreateByType(
         const sp<ALooper> &looper, const AString &mime, bool encoder, status_t *err, pid_t pid,
         uid_t uid) {
+    char proc_name[PROCESS_NAME_MAX_SIZE] = {0};
+    getProcessName(getpid(),proc_name,sizeof(proc_name));
+    ALOGD("app proc_name: %s mime: %s", proc_name, mime.c_str());
+
+
     Vector<AString> matchingCodecs;
 
     MediaCodecList::findMatchingCodecs(
@@ -449,6 +473,7 @@ sp<MediaCodec> MediaCodec::CreateByType(
     if (err != NULL) {
         *err = NAME_NOT_FOUND;
     }
+
     for (size_t i = 0; i < matchingCodecs.size(); ++i) {
         sp<MediaCodec> codec = new MediaCodec(looper, pid, uid);
         AString componentName = matchingCodecs[i];
@@ -462,6 +487,13 @@ sp<MediaCodec> MediaCodec::CreateByType(
         ALOGD("Allocating component '%s' failed (%d), try next one.",
                 componentName.c_str(), ret);
     }
+
+    if ((err != NULL) && (!strcmp(proc_name,"com.tencent.mm")) && (!encoder)
+            && (!strcmp(mime.c_str(),"video/hevc"))) {
+       ALOGV("called by proc_name: %s, mime: %s", proc_name, mime.c_str());
+       *err = UNKNOWN_ERROR;
+    }
+
     return NULL;
 }
 
@@ -531,11 +563,21 @@ MediaCodec::MediaCodec(const sp<ALooper> &looper, pid_t pid, uid_t uid)
       mHaveInputSurface(false),
       mHavePendingInputBuffers(false),
       mCpuBoostRequested(false),
+      mStartNotified(false),
       mLatencyUnknown(0) {
     if (uid == kNoUid) {
         mUid = IPCThreadState::self()->getCallingUid();
     } else {
         mUid = uid;
+    }
+
+    sp<IBinder> binder =
+        defaultServiceManager()->checkService(String16("sprdssense"));
+
+    if (binder == 0) {
+        ALOGW("cannot connect to the sprdssense service");
+    } else {
+        mSSense = interface_cast<ISSense>(binder);
     }
 
     initAnalyticsItem();
@@ -544,6 +586,13 @@ MediaCodec::MediaCodec(const sp<ALooper> &looper, pid_t pid, uid_t uid)
 MediaCodec::~MediaCodec() {
     CHECK_EQ(mState, UNINITIALIZED);
     mResourceManagerService->removeResource(getId(mResourceManagerClient));
+
+    if (mSSense != NULL && mStartNotified) {
+        // stop video
+        mSSense->reportData(DATA_TYPE_APP_VIDEO, mUid, DATA_SUBTYPE_APP_VIDEO_STOP, 0, 0);
+        mStartNotified = false;
+        ALOGV("report data to the sprdssense service,---stop");
+    }
 
     flushAnalyticsItem();
 }
@@ -2599,6 +2648,15 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
             mReplyID = replyID;
             setState(STARTING);
 
+            if (mIsVideo && mSurface != NULL && !(mFlags & kFlagIsEncoder)) {
+                // start video
+                if (mSSense != NULL) {
+                    mStartNotified = true;
+                    mSSense->reportData(DATA_TYPE_APP_VIDEO, mUid, DATA_SUBTYPE_APP_VIDEO_START, mVideoWidth, mVideoHeight);
+                    ALOGV("report data to the sprdssense service,---start");
+                }
+            }
+
             mCodec->initiateStart();
             break;
         }
@@ -2703,6 +2761,13 @@ void MediaCodec::onMessageReceived(const sp<AMessage> &msg) {
 
             mCodec->initiateShutdown(
                     msg->what() == kWhatStop /* keepComponentAllocated */);
+
+            if (mSSense != NULL && mStartNotified) {
+                // stop video
+                mSSense->reportData(DATA_TYPE_APP_VIDEO, mUid, DATA_SUBTYPE_APP_VIDEO_STOP, 0, 0);
+                mStartNotified = false;
+                ALOGV("report data to the sprdssense service,---stop");
+            }
 
             returnBuffersToCodec(reclaimed);
 

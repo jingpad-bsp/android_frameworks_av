@@ -35,6 +35,8 @@
 #include <media/MediaAnalyticsItem.h>
 #include <media/TypeConverter.h>
 
+#define PROCESS_NAME_MAX_SIZE 100
+
 #define WAIT_PERIOD_MS          10
 
 namespace android {
@@ -372,6 +374,19 @@ exit:
     return status;
 }
 
+static void getProcessName(int pid, char *buffer, size_t max) {
+    int fd;
+    snprintf(buffer, max, "/proc/%d/cmdline", pid);
+    fd = open(buffer, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        strcpy(buffer, "???");
+    } else {
+        int length = read(fd, buffer, max - 1);
+        buffer[length] = 0;
+        close(fd);
+    }
+}
+
 // -------------------------------------------------------------------------
 
 status_t AudioRecord::start(AudioSystem::sync_event_t event, audio_session_t triggerSession)
@@ -382,6 +397,21 @@ status_t AudioRecord::start(AudioSystem::sync_event_t event, audio_session_t tri
     if (mActive) {
         return NO_ERROR;
     }
+
+    {
+         String8 record_bypass("record_bypass=1");
+         char proc_name[PROCESS_NAME_MAX_SIZE] = {0};
+         getProcessName(getpid(),proc_name,sizeof(proc_name));
+         ALOGI("start  mClientUid:%d mClientPid:%d  mSessionId:%d app name:%s ",
+             mClientUid,
+             mClientPid,
+             mSessionId,
+             proc_name);
+         if(strstr(proc_name,"googlequicksearchbox")) {
+             ALOGI(" record_bypass in start");
+             AudioSystem::setParameters(audio_io_handle_t(0) , record_bypass);
+         }
+     }
 
     // discard data in buffer
     const uint32_t framesFlushed = mProxy->flush();
@@ -467,6 +497,21 @@ void AudioRecord::stop()
 
     // we've successfully started, log that time
     mMediaMetrics.logStop(systemTime());
+
+    {
+        String8 record_bypass("record_bypass=0");
+        char proc_name[PROCESS_NAME_MAX_SIZE] = {0};
+        getProcessName(getpid(),proc_name,sizeof(proc_name));
+        ALOGI("start  mClientUid:%d mClientPid:%d  mSessionId:%d app name:%s ",
+            mClientUid,
+            mClientPid,
+            mSessionId,
+            proc_name);
+        if(strstr(proc_name,"googlequicksearchbox")) {
+            ALOGI(" record_bypass in stop");
+            AudioSystem::setParameters(audio_io_handle_t(0) , record_bypass);
+        }
+    }
 }
 
 bool AudioRecord::stopped() const

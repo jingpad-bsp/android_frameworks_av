@@ -28,6 +28,7 @@ cc_library_static {
         "frameworks/av/media/libstagefright/mpeg2ts",
         "frameworks/av/media/libstagefright/rtsp",
         "frameworks/av/media/libstagefright/timedtext",
+        "frameworks/av/media/libstagefright/rtsp/rtsp-ex",
     ],
 
     cflags: [
@@ -45,6 +46,7 @@ cc_library_static {
 
     shared_libs: [
         "libbinder",
+        "libdrmframework",
         "libui",
         "libgui",
         "libmedia",

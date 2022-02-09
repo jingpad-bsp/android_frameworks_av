@@ -144,6 +144,8 @@ public:
      * Constant field signifies playback resumed
      */
     static const int RESUME = 0x03;
+
+    static const int COMPLETE = 0x04;
 };
 
 /**
@@ -327,6 +329,13 @@ public:
     }
 };
 
+    class DecryptHandleWrapper : public RefBase {
+    public:
+        sp<DecryptHandle> handle;
+        virtual ~DecryptHandleWrapper() {
+            handle = NULL;
+        }
+    };
 };
 
 #endif /* __DRM_FRAMEWORK_COMMON_H__ */

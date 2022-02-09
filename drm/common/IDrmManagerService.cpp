@@ -769,6 +769,7 @@ status_t BpDrmManagerService::finalizeDecryptUnit(
     return reply.readInt32();
 }
 
+#define GET_SIZE_MAGIC 0xDEADBEEF
 ssize_t BpDrmManagerService::pread(
             int uniqueId, sp<DecryptHandle>& decryptHandle, void* buffer,
             ssize_t numBytes, off64_t offset) {
@@ -786,7 +787,7 @@ ssize_t BpDrmManagerService::pread(
 
     remote()->transact(PREAD, data, &reply);
     result = reply.readInt32();
-    if (0 < result) {
+    if (0 < result && GET_SIZE_MAGIC != offset) {
         reply.read(buffer, result);
     }
     return result;
@@ -1525,7 +1526,7 @@ status_t BnDrmManagerService::onTransact(
 
         ssize_t result = pread(uniqueId, handle, buffer, numBytes, offset);
         reply->writeInt32(result);
-        if (0 < result) {
+        if (0 < result && GET_SIZE_MAGIC != offset) {
             reply->write(buffer, result);
         }
 

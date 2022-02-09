@@ -24,6 +24,8 @@
 #define ALOGVV(a...) do { } while(0)
 #endif
 
+#define UNUSED_ATTR __attribute__((unused))
+
 #include "Engine.h"
 #include <android-base/macros.h>
 #include <AudioPolicyManagerObserver.h>
@@ -676,7 +678,7 @@ void Engine::updateDeviceSelectionCache()
     }
 }
 
-DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t strategy) const
+DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t strategy, UNUSED_ATTR bool ignoreFM) const
 {
     DeviceVector availableOutputDevices = getApmObserver()->getAvailableOutputDevices();
     DeviceVector availableInputDevices = getApmObserver()->getAvailableInputDevices();
@@ -693,7 +695,7 @@ DeviceVector Engine::getDevicesForProductStrategy(product_strategy_t strategy) c
 
 DeviceVector Engine::getOutputDevicesForAttributes(const audio_attributes_t &attributes,
                                                    const sp<DeviceDescriptor> &preferredDevice,
-                                                   bool fromCache) const
+                                                   bool fromCache, bool ignoreFM) const
 {
     // First check for explict routing device
     if (preferredDevice != nullptr) {
@@ -714,7 +716,7 @@ DeviceVector Engine::getOutputDevicesForAttributes(const audio_attributes_t &att
         return DeviceVector(device);
     }
 
-    return fromCache? mDevicesForStrategies.at(strategy) : getDevicesForProductStrategy(strategy);
+    return fromCache? mDevicesForStrategies.at(strategy) : getDevicesForProductStrategy(strategy, ignoreFM);
 }
 
 DeviceVector Engine::getOutputDevicesForStream(audio_stream_type_t stream, bool fromCache) const

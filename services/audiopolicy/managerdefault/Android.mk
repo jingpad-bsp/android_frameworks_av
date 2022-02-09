@@ -13,6 +13,14 @@ LOCAL_SHARED_LIBRARIES := \
     libaudiopolicy \
     libsoundtrigger
 
+ifeq ($(USE_CUSTOM_AUDIO_POLICY), 1)
+LOCAL_CFLAGS += -DSPRD_CUSTOM_AUDIO_POLICY
+endif
+
+ifeq ($(strip $(USE_AUDIO_WHALE_HAL)),true)
+LOCAL_CFLAGS += -DAUDIO_WHALE
+endif
+
 ifeq ($(USE_CONFIGURABLE_AUDIO_POLICY), 1)
 
 ifneq ($(USE_XML_AUDIO_POLICY_CONF), 1)

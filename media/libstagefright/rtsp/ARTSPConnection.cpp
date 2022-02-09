@@ -53,7 +53,8 @@ ARTSPConnection::ARTSPConnection(bool uidValid, uid_t uid)
       mSocket(-1),
       mConnectionID(0),
       mNextCSeq(0),
-      mReceiveResponseEventPending(false) {
+      mReceiveResponseEventPending(false),
+      mIsTearDown(false) {
 }
 
 ARTSPConnection::~ARTSPConnection() {
@@ -438,7 +439,7 @@ void ARTSPConnection::onSendRequest(const sp<AMessage> &msg) {
 
     request.insert(cseqHeader, i + 2);
 
-    ALOGV("request: '%s'", request.c_str());
+    ALOGI("request: '%s'", request.c_str());
 
     size_t numBytesSent = 0;
     while (numBytesSent < request.size()) {
@@ -470,6 +471,7 @@ void ARTSPConnection::onSendRequest(const sp<AMessage> &msg) {
 
         numBytesSent += (size_t)n;
     }
+    ALOGI("request send success !");
 
     mPendingRequests.add(cseq, reply);
 }
@@ -533,9 +535,13 @@ void ARTSPConnection::postReceiveReponseEvent() {
 status_t ARTSPConnection::receive(void *data, size_t size) {
     size_t offset = 0;
     while (offset < size) {
+        if (mIsTearDown){
+            ALOGI("mIsTearDown is set. no need wait rtp rtcp rtsp data at all");
+            return -1;
+        }
         ssize_t n = recv(mSocket, (uint8_t *)data + offset, size - offset, 0);
 
-        if (n < 0 && errno == EINTR) {
+        if (n < 0 && (errno == EINTR || errno==EAGAIN)) {
             continue;
         }
 
@@ -615,10 +621,16 @@ bool ARTSPConnection::receiveRTSPReponse() {
     }
 
     if (statusLine == "$") {
+        MakeSocketBlocking(mSocket, false);
         sp<ABuffer> buffer = receiveBinaryData();
 
         if (buffer == NULL) {
             return false;
+        }
+
+        if (mIsTearDown) {
+            ALOGI("It is tearing down from server, no care the rtp and rtcp data");
+            return true;
         }
 
         if (mObserveBinaryMessage != NULL) {

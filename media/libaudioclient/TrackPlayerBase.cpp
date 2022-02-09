@@ -35,7 +35,10 @@ TrackPlayerBase::~TrackPlayerBase() {
 
 void TrackPlayerBase::init(AudioTrack* pat, player_type_t playerType, audio_usage_t usage) {
     PlayerBase::init(playerType, usage);
-    mAudioTrack = pat;
+    Mutex::Autolock _l(mAudioTrackLock);
+    {
+        mAudioTrack = pat;
+    }
 }
 
 void TrackPlayerBase::destroy() {
@@ -44,6 +47,7 @@ void TrackPlayerBase::destroy() {
 }
 
 void TrackPlayerBase::doDestroy() {
+    Mutex::Autolock _l(mAudioTrackLock);
     if (mAudioTrack != 0) {
         mAudioTrack->stop();
         // Note that there may still be another reference in post-unlock phase of SetPlayState
@@ -64,6 +68,7 @@ void TrackPlayerBase::setPlayerVolume(float vl, float vr) {
 // Implementation of IPlayer
 status_t TrackPlayerBase::playerStart() {
     status_t status = NO_INIT;
+    Mutex::Autolock _l(mAudioTrackLock);
     if (mAudioTrack != 0) {
         status = mAudioTrack->start();
     }
@@ -72,6 +77,7 @@ status_t TrackPlayerBase::playerStart() {
 
 status_t TrackPlayerBase::playerPause() {
     status_t status = NO_INIT;
+    Mutex::Autolock _l(mAudioTrackLock);
     if (mAudioTrack != 0) {
         mAudioTrack->pause();
         status = NO_ERROR;
@@ -82,6 +88,7 @@ status_t TrackPlayerBase::playerPause() {
 
 status_t TrackPlayerBase::playerStop() {
     status_t status = NO_INIT;
+    Mutex::Autolock _l(mAudioTrackLock);
     if (mAudioTrack != 0) {
         mAudioTrack->stop();
         status = NO_ERROR;
@@ -95,6 +102,7 @@ status_t TrackPlayerBase::playerSetVolume() {
 
 status_t TrackPlayerBase::doSetVolume() {
     status_t status = NO_INIT;
+    Mutex::Autolock _l(mAudioTrackLock);
     if (mAudioTrack != 0) {
         float tl = mPlayerVolumeL * mPanMultiplierL * mVolumeMultiplierL;
         float tr = mPlayerVolumeR * mPanMultiplierR * mVolumeMultiplierR;
@@ -112,6 +120,7 @@ binder::Status TrackPlayerBase::applyVolumeShaper(
     sp<VolumeShaper::Configuration> spConfiguration = new VolumeShaper::Configuration(configuration);
     sp<VolumeShaper::Operation> spOperation = new VolumeShaper::Operation(operation);
 
+    Mutex::Autolock _l(mAudioTrackLock);
     if (mAudioTrack != 0) {
         ALOGD("TrackPlayerBase::applyVolumeShaper() from IPlayer");
         VolumeShaper::Status status = mAudioTrack->applyVolumeShaper(spConfiguration, spOperation);

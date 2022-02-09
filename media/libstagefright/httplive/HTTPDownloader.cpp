@@ -41,6 +41,7 @@ HTTPDownloader::HTTPDownloader(
     mHTTPDataSource(new ClearMediaHTTP(httpService->makeHTTPConnection())),
     mExtraHeaders(headers),
     mDisconnecting(false) {
+    init();
 }
 
 void HTTPDownloader::reconnect() {
@@ -263,6 +264,10 @@ sp<M3UParser> HTTPDownloader::fetchPlaylist(
         return NULL;
     }
 #endif
+
+    if (mDumpPlaylist) {
+        dumpPlaylist(buffer);
+    }
 
     sp<M3UParser> playlist =
         new M3UParser(actualUrl.string(), buffer->data(), buffer->size());

@@ -300,6 +300,14 @@ public:
                                     audio_session_t sessionId,
                                     bool suspended);
 
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+            static void *UidPolicyThreadWrapper(void * /*arg*/);
+            void UidThreadFunc();
+
+            static void *SensorPrivacyPolicyThreadWrapper(void * /*arg*/);
+            void SensorPrivacyThreadFunc();
+#endif
+
 private:
                         AudioPolicyService() ANDROID_API;
     virtual             ~AudioPolicyService();

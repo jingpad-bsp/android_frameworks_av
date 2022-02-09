@@ -141,7 +141,9 @@ public:
 
     static size_t calculateBufferSize(int width, int height,
             int format, int stride);
-
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    status_t updateIsTakePictureWithFlashParamToAppEx(int value);
+#endif
     static const int32_t kPreviewRequestIdStart = 10000000;
     static const int32_t kPreviewRequestIdEnd   = 20000000;
 

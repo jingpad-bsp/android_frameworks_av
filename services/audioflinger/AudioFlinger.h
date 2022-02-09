@@ -303,6 +303,10 @@ public:
 
     static int onExternalVibrationStart(const sp<os::ExternalVibration>& externalVibration);
     static void onExternalVibrationStop(const sp<os::ExternalVibration>& externalVibration);
+
+    void setIsUseAudioWhaleHal(bool enable) { useAudioWhaleHal = enable; }
+    bool isUseAudioWhaleHal() const { return useAudioWhaleHal; }
+
 private:
     // FIXME The 400 is temporarily too high until a leak of writers in media.log is fixed.
     static const size_t kLogMemorySize = 400 * 1024;
@@ -311,6 +315,7 @@ private:
     // for as long as possible.  The memory is only freed when it is needed for another log writer.
     Vector< sp<NBLog::Writer> > mUnregisteredWriters;
     Mutex               mUnregisteredWritersLock;
+    bool useAudioWhaleHal;
 
 public:
 
@@ -510,6 +515,7 @@ private:
 
         // Duration of the sleep period after a processed request
         static const int kPostTriggerSleepPeriod = 1000000;
+
     };
 
     const sp<MediaLogNotifier> mMediaLogNotifier;

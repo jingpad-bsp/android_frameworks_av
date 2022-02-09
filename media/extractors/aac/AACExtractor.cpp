@@ -132,6 +132,7 @@ static size_t getAdtsFrameLength(DataSourceHelper *source, off64_t offset, size_
 AACExtractor::AACExtractor(
         DataSourceHelper *source, off64_t offset)
     : mDataSource(source),
+      mMeta(nullptr),
       mInitCheck(NO_INIT),
       mFrameDurationUs(0) {
 
@@ -180,7 +181,9 @@ AACExtractor::AACExtractor(
 }
 
 AACExtractor::~AACExtractor() {
-    AMediaFormat_delete(mMeta);
+    if (mMeta != nullptr) {
+        AMediaFormat_delete(mMeta);
+    }
 }
 
 media_status_t AACExtractor::getMetaData(AMediaFormat *meta) {
@@ -271,6 +274,11 @@ media_status_t AACSource::read(
     int64_t seekTimeUs;
     ReadOptions::SeekMode mode;
     if (options && options->getSeekTo(&seekTimeUs, &mode)) {
+        int64_t duration;
+        if (AMediaFormat_getInt64(mMeta,AMEDIAFORMAT_KEY_DURATION,&duration)) {
+            seekTimeUs =  (seekTimeUs >= duration) ? (duration - (mFrameDurationUs<<2)) : seekTimeUs;
+        }
+
         if (mFrameDurationUs > 0) {
             int64_t seekFrame = seekTimeUs / mFrameDurationUs;
             if (seekFrame < 0 || seekFrame >= (int64_t)mOffsetVector.size()) {

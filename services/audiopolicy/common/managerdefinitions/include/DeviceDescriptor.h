@@ -73,6 +73,9 @@ public:
     void log() const;
     std::string toString() const;
 
+    void setoffload(bool enable) { SupportUsbOffload =enable; }
+    bool issupportusboffload() const { return SupportUsbOffload; }
+
 private:
     String8 mAddress{""};
     String8 mTagName; // Unique human readable identifier for a device port found in conf file.
@@ -80,6 +83,8 @@ private:
     FormatVector        mEncodedFormats;
     audio_port_handle_t mId = AUDIO_PORT_HANDLE_NONE;
     audio_format_t      mCurrentEncodedFormat;
+
+    bool SupportUsbOffload;
 };
 
 class DeviceVector : public SortedVector<sp<DeviceDescriptor> >

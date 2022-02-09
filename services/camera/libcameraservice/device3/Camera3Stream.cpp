@@ -690,6 +690,9 @@ status_t Camera3Stream::returnBuffer(const camera3_stream_buffer &buffer,
 
     // Buffer status may be changed, so make a copy of the stream_buffer struct.
     camera3_stream_buffer b = buffer;
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    timestampIncreasing = false;
+#endif
     if (timestampIncreasing && timestamp != 0 && timestamp <= mLastTimestamp) {
         ALOGE("%s: Stream %d: timestamp %" PRId64 " is not increasing. Prev timestamp %" PRId64,
                 __FUNCTION__, mId, timestamp, mLastTimestamp);

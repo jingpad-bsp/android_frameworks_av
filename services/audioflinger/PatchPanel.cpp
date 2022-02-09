@@ -401,7 +401,8 @@ status_t AudioFlinger::PatchPanel::createAudioPatch(const struct audio_patch *pa
 exit:
     ALOGV("%s() status %d", __func__, status);
     if (status == NO_ERROR) {
-        *handle = (audio_patch_handle_t) mAudioFlinger.nextUniqueId(AUDIO_UNIQUE_ID_USE_PATCH);
+        if(*handle == AUDIO_PATCH_HANDLE_NONE)
+            *handle = (audio_patch_handle_t) mAudioFlinger.nextUniqueId(AUDIO_UNIQUE_ID_USE_PATCH);
         newPatch.mHalHandle = halHandle;
         mPatches.insert(std::make_pair(*handle, std::move(newPatch)));
         if (insertedModule != AUDIO_MODULE_HANDLE_NONE) {

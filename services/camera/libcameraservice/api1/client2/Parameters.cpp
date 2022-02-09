@@ -33,6 +33,10 @@
 #include <android/hardware/ICamera.h>
 #include <media/MediaProfiles.h>
 #include <media/mediarecorder.h>
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "SprdCamera3Tags.h"
+#include "api1/client2/ParametersExFun.h"
+#endif
 
 namespace android {
 namespace camera2 {
@@ -43,6 +47,9 @@ Parameters::Parameters(int cameraId,
         cameraFacing(cameraFacing),
         info(NULL),
         mDefaultSceneMode(ANDROID_CONTROL_SCENE_MODE_DISABLED) {
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    topAppId = 0;
+#endif
 }
 
 Parameters::~Parameters() {
@@ -69,7 +76,25 @@ status_t Parameters::initialize(CameraDeviceBase *device, int deviceVersion) {
     res = buildQuirks();
     if (res != OK) return res;
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    // SPRD some chips can't support to 1920x1920 preview size
     Size maxPreviewSize = { MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT };
+    camera_metadata_ro_entry_t previewSize =
+        staticInfo(ANDROID_SPRD_MAX_PREVIEW_SIZE, 2);
+    if (previewSize.count) {
+        ALOGV("maxPreviewSize w=%d, h=%d", previewSize.data.i32[0],
+            previewSize.data.i32[1]);
+        if (previewSize.data.i32[0] > 0 &&
+                previewSize.data.i32[1] > 0 &&
+                previewSize.data.i32[0] <= maxPreviewSize.width &&
+                previewSize.data.i32[1] <= maxPreviewSize.height) {
+            maxPreviewSize.width = previewSize.data.i32[0];
+            maxPreviewSize.height = previewSize.data.i32[1];
+        }
+    }
+#else
+    const Size maxPreviewSize = { MAX_PREVIEW_WIDTH, MAX_PREVIEW_HEIGHT };
+#endif
     // Treat the H.264 max size as the max supported video size.
     MediaProfiles *videoEncoderProfiles = MediaProfiles::getInstance();
     Vector<video_encoder> encoders = videoEncoderProfiles->getVideoEncoders();
@@ -297,6 +322,9 @@ status_t Parameters::initialize(CameraDeviceBase *device, int deviceVersion) {
         params.set(CameraParameters::KEY_SUPPORTED_PREVIEW_FRAME_RATES,
                 supportedPreviewFrameRates);
     }
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    initializeEx(this);
+#endif /* SPRD_FRAMEWORKS_CAMERA_EX */
 
     Vector<Size> availableJpegSizes = getAvailableJpegSizes();
     if (!availableJpegSizes.size()) return NO_INIT;
@@ -1347,9 +1375,21 @@ status_t Parameters::set(const String8& paramString) {
                     validatedParams.previewHeight)) break;
         }
         if (i == availablePreviewSizes.size()) {
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+            if (newParams.get(CameraParameters::KEY_3DNR)) {
+                ALOGI("3dnr video support 1080p preview");
+            } else {
+                ALOGE("%s: Requested preview size %d x %d is not supported",
+                        __FUNCTION__, validatedParams.previewWidth,
+                        validatedParams.previewHeight);
+                return BAD_VALUE;
+            }
+#else
             ALOGE("%s: Requested preview size %d x %d is not supported",
                     __FUNCTION__, validatedParams.previewWidth,
                     validatedParams.previewHeight);
+            return BAD_VALUE;
+#endif
             return BAD_VALUE;
         }
     }
@@ -1608,7 +1648,9 @@ status_t Parameters::set(const String8& paramString) {
             return BAD_VALUE;
         }
     }
-
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    setEx(this , &validatedParams , &newParams);
+#endif /* SPRD_FRAMEWORKS_CAMERA_EX */
     // JPEG_THUMBNAIL_WIDTH/HEIGHT
     validatedParams.jpegThumbSize[0] =
             newParams.getInt(CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH);
@@ -1983,6 +2025,19 @@ status_t Parameters::set(const String8& paramString) {
     // VIDEO_SIZE
     newParams.getVideoSize(&validatedParams.videoWidth,
             &validatedParams.videoHeight);
+#ifdef CONFIG_CAMERA_SPRD_EIS
+    validatedParams.eisMode = false;
+    if(newParams.getSprdEOIS()!= NULL) {
+        int eisdisable;
+        eisdisable = strcmp(newParams.getSprdEOIS(),"true");
+        validatedParams.eisMode = (eisdisable == 0) ? true : false;
+    }
+    if (validatedParams.eisMode) {
+         //leave two*height*1.5 bytes to for eis parameters
+         validatedParams.videoWidth = validatedParams.videoWidth + 2;
+         ALOGD("set.videoWidth = %d, videoHeight = %d", videoWidth, videoHeight);
+    }
+#endif
     if (validatedParams.videoWidth != videoWidth ||
             validatedParams.videoHeight != videoHeight) {
         if (state == RECORD) {
@@ -2001,10 +2056,19 @@ status_t Parameters::set(const String8& paramString) {
                         validatedParams.videoHeight)) break;
             }
             if (i == availableVideoSizes.size()) {
+#ifdef CONFIG_CAMERA_SPRD_EIS
+                if (validatedParams.eisMode == false) {
+                    ALOGE("%s: Requested video size %d x %d is not supported",
+                           __FUNCTION__, validatedParams.videoWidth,
+                           validatedParams.videoHeight);
+                    return BAD_VALUE;
+                }
+#else
                 ALOGE("%s: Requested video size %d x %d is not supported",
                         __FUNCTION__, validatedParams.videoWidth,
                         validatedParams.videoHeight);
                 return BAD_VALUE;
+#endif
             }
         }
     }
@@ -2195,6 +2259,20 @@ status_t Parameters::updateRequest(CameraMetadata *request) const {
     res = request->update(ANDROID_CONTROL_AWB_MODE,
             &wbMode, 1);
     if (res != OK) return res;
+
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    updateRequestEx(this , request);
+#endif /* SPRD_FRAMEWORKS_CAMERA_EX */
+
+#ifdef CONFIG_CAMERA_SPRD_EIS
+    {
+        uint8_t reqEisMode = eisMode;
+        ALOGI("eisMode = %d", reqEisMode);
+        res = request->update(ANDROID_SPRD_EIS_ENABLED,
+        &reqEisMode, 1);
+        if (res!=OK) return res;
+    }
+#endif
 
     float reqFocusDistance = 0; // infinity focus in diopters
     uint8_t reqFocusMode = ANDROID_CONTROL_AF_MODE_OFF;

@@ -63,6 +63,7 @@ cc_library_shared {
         "-Wall",
         "-Wextra",
         "-Werror",
+        "-DSPRD_FRAMEWORKS_CAMERA_EX",
     ],
     // TODO: jchowdhary@, use header_libs instead b/131165718
     include_dirs: [
@@ -104,6 +105,7 @@ cc_library_shared {
         "-fvisibility=hidden",
         "-DEXPORT=__attribute__((visibility(\"default\")))",
         "-D__ANDROID_VNDK__",
+        "-DSPRD_FRAMEWORKS_CAMERA_EX",
     ],
 
     shared_libs: [

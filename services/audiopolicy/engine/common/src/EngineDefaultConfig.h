@@ -129,6 +129,16 @@ const engineConfig::ProductStrategies gOrderedStrategies = {
          }
      },
     }
+#ifdef SPRD_CUSTOM_AUDIO_POLICY
+    ,
+    {"STRATEGY_FM",
+      {
+          {"", AUDIO_STREAM_FM, "AUDIO_STREAM_FM",
+           {{AUDIO_CONTENT_TYPE_UNKNOWN, AUDIO_USAGE_UNKNOWN, AUDIO_SOURCE_DEFAULT, 0, ""}}
+          }
+      },
+    }
+#endif
 };
 
 const engineConfig::Config gDefaultEngineConfig = {

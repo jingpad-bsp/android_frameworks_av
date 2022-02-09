@@ -383,6 +383,10 @@ class CameraDeviceBase : public virtual RefBase {
      * drop buffers for stream of streamId.
      */
     virtual status_t dropStreamBuffers(bool /*dropping*/, int /*streamId*/) = 0;
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "common/CameraDeviceBaseEx.h"
+#endif
+    
 };
 
 }; // namespace android

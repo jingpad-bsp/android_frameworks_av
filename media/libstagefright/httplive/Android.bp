@@ -7,11 +7,14 @@ cc_library {
         "LiveSession.cpp",
         "M3UParser.cpp",
         "PlaylistFetcher.cpp",
+        "httplive-ex/PlaylistFetcherEx.cpp",
+        "httplive-ex/HTTPDownloaderEx.cpp"
     ],
 
     include_dirs: [
         "frameworks/av/media/libstagefright",
         "frameworks/native/include/media/openmax",
+        "frameworks/av/media/libstagefright/httplive/httplive-ex",
     ],
 
     cflags: [

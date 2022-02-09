@@ -78,6 +78,7 @@ private:
     Mutex mLock;
     bool mDisconnecting;
 
+#include "HTTPDownloaderEx.h"
     DISALLOW_EVIL_CONSTRUCTORS(HTTPDownloader);
 };
 

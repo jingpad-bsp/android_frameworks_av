@@ -39,6 +39,8 @@
 #include <utils/Trace.h>
 
 #include "api2/HeicCompositeStream.h"
+// SPRD
+#include "common/CameraProviderManagerEx.h"
 
 namespace android {
 
@@ -217,7 +219,29 @@ status_t CameraProviderManager::getHighestSupportedVersion(const std::string &id
     std::lock_guard<std::mutex> lock(mInterfaceMutex);
 
     hardware::hidl_version maxVersion{0,0};
-    bool found = false;
+     bool found = false;
+
+     // SPRD
+    if(isSprdMultiCamera(atoi(id.c_str()))) {
+        std::string fakeCameraId = id;
+        fakeCameraId = String8::format("%d",getMainCamIdForMultiCamId(atoi(id.c_str())));
+        for (auto& provider : mProviders) {
+            for (auto& deviceInfo : provider->mDevices) {
+                if (deviceInfo->mId == fakeCameraId) {
+                    if (deviceInfo->mVersion > maxVersion) {
+                        maxVersion = deviceInfo->mVersion;
+                        found = true;
+                    }
+                }
+            }
+        }
+        if (!found) {
+            return NAME_NOT_FOUND;
+        }
+        *v = maxVersion;
+        return OK;
+    }
+
     for (auto& provider : mProviders) {
         for (auto& deviceInfo : provider->mDevices) {
             if (deviceInfo->mId == id) {
@@ -1286,7 +1310,19 @@ status_t CameraProviderManager::ProviderInfo::initialize(
             continue;
         }
     }
-
+    // SPRD
+    std::vector<std::string> sprdFakeCameraList;
+    bool isInitSprdDualCamera = initSprdMultiCamera(sprdFakeCameraList);
+    if(isInitSprdDualCamera) {
+        std::string fakeCameraID;
+        for(auto& device : sprdFakeCameraList) {
+            res = addDevice(device,
+            hardware::camera::common::V1_0::CameraDeviceStatus::PRESENT, &fakeCameraID);
+            if (res != OK) {
+                ALOGE("Unable to add fake camera(%s) : %s (%d)", fakeCameraID.c_str(), strerror(-res), res);
+            }
+        }
+    }
     ALOGI("Camera provider %s ready with %zu camera devices",
             mProviderName.c_str(), mDevices.size());
 
@@ -1388,6 +1424,14 @@ status_t CameraProviderManager::ProviderInfo::addDevice(const std::string& name,
     bool isAPI1Compatible = deviceInfo->isAPI1Compatible();
 
     mDevices.push_back(std::move(deviceInfo));
+ // SPRD
+    if (atoi(id.c_str()) > SPRD_MULTI_CAMERA_BASE_ID &&
+        atoi(id.c_str()) < SPRD_MULTI_CAMERA_MAX_ID) {
+        if (parsedId != nullptr) {
+            *parsedId = id;
+        }
+        return OK;
+    }
 
     mUniqueCameraIds.insert(id);
     if (isAPI1Compatible) {
@@ -2031,6 +2075,7 @@ status_t CameraProviderManager::ProviderInfo::DeviceInfo3::getCameraInfo(
     camera_metadata_ro_entry facing =
             mCameraCharacteristics.find(ANDROID_LENS_FACING);
     if (facing.count == 1) {
+        info->facing = facing.data.u8[0];
         switch (facing.data.u8[0]) {
             case ANDROID_LENS_FACING_BACK:
                 info->facing = hardware::CAMERA_FACING_BACK;

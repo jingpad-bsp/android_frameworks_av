@@ -32,6 +32,7 @@
 
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <cutils/properties.h>
 
 namespace android {
 
@@ -120,8 +121,15 @@ void ARTPConnection::MakePortPair(
     /* rand() * 1000 may overflow int type, use long long */
     unsigned start = (unsigned)((rand()* 1000LL)/RAND_MAX) + 15550;
     start &= ~1;
+    unsigned end = 65536;
+    if (property_get_bool("ro.vodafone.feature.enable", false)) {
+        ALOGI("MakePortPair vodafone feature is enable");
+        //SPRD: add for Vodafone feature request the UDP port scope in [6970 - 32000]
+        start = 6970;
+        end = 32001;
+    }
 
-    for (unsigned port = start; port < 65536; port += 2) {
+    for (unsigned port = start; port < end; port += 2) {
         struct sockaddr_in addr;
         memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
         addr.sin_family = AF_INET;

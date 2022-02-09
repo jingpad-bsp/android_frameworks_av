@@ -30,6 +30,7 @@ cc_library_static {
         "-Wall",
         "-Werror",
         "-Wextra",
+        "-DSPRD_CUSTOM_AUDIO_POLICY",
     ],
     header_libs: [
         "libbase_headers",

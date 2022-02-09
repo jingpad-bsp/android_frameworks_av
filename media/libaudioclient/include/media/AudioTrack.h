@@ -960,6 +960,7 @@ public:
         bool                mIgnoreNextPausedInt;   // skip any internal pause and go immediately
                                         // to processAudioBuffer() as state may have changed
                                         // since pause time calculated.
+        bool                mFlagForceSetFg;
     };
 
             // body of AudioTrackThread::threadLoop()

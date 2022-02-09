@@ -60,10 +60,13 @@
 #include "include/SecureBuffer.h"
 #include "include/SharedMemoryBuffer.h"
 #include <media/stagefright/omx/OMXUtils.h>
+#include "include/VideoPowerHint.h"
 
 namespace android {
 
 using binder::Status;
+
+bool ACodec::mIsWFDRunning = false;
 
 enum {
     kMaxIndicesToCheck = 32, // used when enumerating supported formats and profiles
@@ -570,6 +573,10 @@ ACodec::ACodec()
       mCaptureFps(-1.0),
       mCreateInputBuffersSuspended(false),
       mTunneled(false),
+      mIsForWFD(false),
+      mFirstTimeStampUs(-1),
+      mEstimatedFPS(-1),
+      mFramesNumber(0),
       mDescribeColorAspectsIndex((OMX_INDEXTYPE)0),
       mDescribeHDRStaticInfoIndex((OMX_INDEXTYPE)0),
       mDescribeHDR10PlusInfoIndex((OMX_INDEXTYPE)0),
@@ -589,6 +596,7 @@ ACodec::ACodec()
     mExecutingToIdleState = new ExecutingToIdleState(this);
     mIdleToLoadedState = new IdleToLoadedState(this);
     mFlushingState = new FlushingState(this);
+    mVideoPoewerHint = new VideoPowerHintInstance(mIsWFDRunning);
 
     mPortEOS[kPortIndexInput] = mPortEOS[kPortIndexOutput] = false;
     mInputEOSResult = OK;
@@ -602,6 +610,17 @@ ACodec::ACodec()
 }
 
 ACodec::~ACodec() {
+    if (mVideoPoewerHint != NULL)
+    {
+        mVideoPoewerHint->release();
+        delete mVideoPoewerHint;
+    }
+
+    if(mIsForWFD)
+    {
+        mIsWFDRunning = false;
+        ALOGI("~ACodec for WFD exit");
+    }
 }
 
 void ACodec::initiateSetup(const sp<AMessage> &msg) {
@@ -1706,8 +1725,36 @@ status_t ACodec::setComponentRole(
 status_t ACodec::configureCodec(
         const char *mime, const sp<AMessage> &msg) {
     int32_t encoder;
+    bool issprdmp3_enc=false;
+    int32_t sprdmp3_enc_flag=0;
     if (!msg->findInt32("encoder", &encoder)) {
         encoder = false;
+    }
+
+
+    if( msg->findInt32("sprdmp3-encoder", &sprdmp3_enc_flag)){
+         if(sprdmp3_enc_flag==1){
+             issprdmp3_enc=true;
+             ALOGI("configureCodec sprd mp3 encorder");
+         }
+    }
+
+    int32_t recordmode = 0;
+    if (encoder && msg->findInt32("record-mode", &recordmode) && recordmode > 0){
+        OMX_INDEXTYPE index;
+        status_t err =
+            mOMXNode->getExtensionIndex(
+                "OMX.sprd.index.RecordMode",
+                &index);
+        if (err == OK) {
+            int64_t mode = recordmode;
+            err = mOMXNode->setParameter(
+                index, &mode, sizeof(mode));
+        }
+        if (err != OK) {
+            ALOGE("recordmode could not be configured (err %d)", err);
+            return err;
+        }
     }
 
     sp<AMessage> inputFormat = new AMessage;
@@ -1748,6 +1795,59 @@ status_t ACodec::configureCodec(
         // average bitrate. We've been setting both bitrate and max-bitrate to this same value.
         outputFormat->setInt32("bitrate", bitrate);
         outputFormat->setInt32("max-bitrate", bitrate);
+    }
+
+    AString mode;
+    if (encoder && msg->findString("scene-mode", &mode)) {
+        ALOGI("set scene-mode mode %s",mode.c_str());
+        OMX_INDEXTYPE index;
+        status_t err =
+            mOMXNode->getExtensionIndex(
+                    "OMX.sprd.index.EncSceneMode",
+                    &index);
+        if (err == OK) {
+            int64_t encMode = 0;
+            if (mode == AString("Volte")) {
+                encMode = 1;
+            } else if (mode == AString("Wfd")) {
+                encMode = 2;
+                mIsForWFD = true;
+                mIsWFDRunning = true;
+            }
+            err = mOMXNode->setConfig(
+                index,
+                &encMode,
+                sizeof(encMode));
+        }
+        if (err != OK) {
+            ALOGE("Failed to set config 'encmode' (err %d)", err);
+            return err;
+        }
+    }
+
+    if (!encoder && msg->findString("scene-mode", &mode)) {
+        OMX_INDEXTYPE index;
+        status_t err =
+            mOMXNode->getExtensionIndex(
+                    "OMX.sprd.index.DecSceneMode",
+                    &index);
+        if (err == OK) {
+            int64_t decMode = 0;
+            if (mode == AString("Volte_dec")) {
+                decMode = 3;
+            }
+            if (mode == AString("AFBC")) {
+                decMode = 4;
+            }
+            err = mOMXNode->setConfig(
+                index,
+                &decMode,
+                sizeof(decMode));
+        }
+        if (err != OK) {
+            ALOGE("Failed to set config 'decmode' (err %d)", err);
+            return err;
+        }
     }
 
     int32_t storeMeta;
@@ -2102,10 +2202,18 @@ status_t ACodec::configureCodec(
             // and have the decoder figure it all out.
             err = OK;
         } else {
-            err = setupRawAudioFormat(
-                    encoder ? kPortIndexInput : kPortIndexOutput,
-                    sampleRate,
-                    numChannels);
+            if(true==issprdmp3_enc){
+                err = setupmp3Codec(
+                       encoder,
+                        sampleRate,
+                        numChannels,
+                        bitrate);
+            }else{
+                err = setupRawAudioFormat(
+                        encoder ? kPortIndexInput : kPortIndexOutput,
+                        sampleRate,
+                        numChannels);
+            }
         }
     } else if (!strcasecmp(mime, MEDIA_MIMETYPE_AUDIO_AAC)) {
         int32_t numChannels, sampleRate;
@@ -3066,6 +3174,81 @@ status_t ACodec::setupFlacCodec(
             encoding);
 }
 
+status_t ACodec::setupmp3Codec(bool encoder,
+    int32_t sampleRate, int32_t numChannels, int32_t  bitRate) {
+     status_t err = setupRawAudioFormat(
+             encoder ? kPortIndexInput : kPortIndexOutput,
+             sampleRate,
+             numChannels);
+     ALOGI("setupMp3Codec:%d",encoder);
+     if (err != OK) {
+        ALOGW("setupmp3Codec Failed line:%d",__LINE__);
+         return err;
+     }
+
+     if (encoder) {
+         err = selectAudioPortFormat(kPortIndexOutput, OMX_AUDIO_CodingMP3);
+
+         if (err != OK) {
+             ALOGW("setupmp3Codec Failed line:%d",__LINE__);
+             return err;
+         }
+
+         OMX_PARAM_PORTDEFINITIONTYPE def;
+         InitOMXParams(&def);
+         def.nPortIndex = kPortIndexOutput;
+
+         err = mOMXNode->getParameter(
+                 OMX_IndexParamPortDefinition, &def, sizeof(def));
+
+         if (err != OK) {
+             ALOGW("setupmp3Codec Failed line:%d",__LINE__);
+             return err;
+         }
+
+         def.format.audio.bFlagErrorConcealment = OMX_TRUE;
+         def.format.audio.eEncoding = OMX_AUDIO_CodingMP3;
+
+         err = mOMXNode->setParameter(
+                 OMX_IndexParamPortDefinition, &def, sizeof(def));
+
+         if (err != OK) {
+             ALOGW("setupmp3Codec Failed line:%d",__LINE__);
+             return err;
+         }
+
+         OMX_AUDIO_PARAM_MP3TYPE profile;
+         InitOMXParams(&profile);
+         profile.nPortIndex = kPortIndexOutput;
+
+         err = mOMXNode->getParameter(
+                 OMX_IndexParamAudioMp3, &profile, sizeof(profile));
+
+         if (err != OK) {
+             ALOGW("setupmp3Codec Failed line:%d",__LINE__);
+             return err;
+         }
+
+         profile.nChannels = numChannels;
+
+         profile.eChannelMode =
+             (numChannels == 1)
+                 ? OMX_AUDIO_ChannelModeMono: OMX_AUDIO_ChannelModeStereo;
+
+         profile.nSampleRate = sampleRate;
+         profile.nBitRate = bitRate;
+         profile.nAudioBandWidth = 0;
+
+         err = mOMXNode->setParameter(
+                 OMX_IndexParamAudioMp3, &profile, sizeof(profile));
+         if (err != OK) {
+             ALOGW("setupmp3Codec Failed line:%d",__LINE__);
+             return err;
+         }
+     }
+     return err;
+}
+
 status_t ACodec::setupRawAudioFormat(
         OMX_U32 portIndex, int32_t sampleRate, int32_t numChannels, AudioEncoding encoding) {
     OMX_PARAM_PORTDEFINITIONTYPE def;
@@ -3309,6 +3492,7 @@ static const struct VideoCodingMapEntry {
     { MEDIA_MIMETYPE_VIDEO_VP9, OMX_VIDEO_CodingVP9 },
     { MEDIA_MIMETYPE_VIDEO_DOLBY_VISION, OMX_VIDEO_CodingDolbyVision },
     { MEDIA_MIMETYPE_IMAGE_ANDROID_HEIC, OMX_VIDEO_CodingImageHEIC },
+    { MEDIA_MIMETYPE_VIDEO_AV1, OMX_VIDEO_CodingAV1 },
 };
 
 static status_t GetVideoCodingTypeFromMime(
@@ -3462,6 +3646,8 @@ status_t ACodec::setupVideoDecoder(
         }
         frameRateFloat = (float)frameRateInt;
     }
+    //powerhint
+    mVideoPoewerHint->acquire(width * height, (int)frameRateFloat, mIsWFDRunning);
 
     err = setVideoFormatOnPort(
             kPortIndexInput, width, height, compressionFormat, frameRateFloat);
@@ -6452,6 +6638,24 @@ void ACodec::BaseState::onOutputBufferDrained(const sp<AMessage> &msg) {
             }
         }
 
+        if(mCodec->mEstimatedFPS == -1 && mCodec->mIsVideo)
+        {
+            mCodec->mFramesNumber ++;
+            if(mCodec->mFramesNumber >= 2)
+            {
+                if(mCodec->mFramesNumber == 6 && timestampNs != mCodec->mFirstTimeStampUs)
+                {
+                    mCodec->mEstimatedFPS = 1000 * 1000 * 1000 / ((timestampNs - mCodec->mFirstTimeStampUs) / 4);
+                    ALOGI("Estimated FPS %d", mCodec->mEstimatedFPS);
+                    mCodec->mVideoPoewerHint->acquire(mCodec->mEstimatedFPS);
+                }
+                if(mCodec->mFirstTimeStampUs == -1)
+                {
+                    mCodec->mFirstTimeStampUs = timestampNs;
+                }
+            }
+        }
+
         status_t err;
         err = native_window_set_buffers_timestamp(mCodec->mNativeWindow.get(), timestampNs);
         ALOGW_IF(err != NO_ERROR, "failed to set buffer timestamp: %d", err);
@@ -6822,7 +7026,11 @@ bool ACodec::LoadedState::onConfigureComponent(
     if (!msg->findString("mime", &mime)) {
         err = BAD_VALUE;
     } else {
-        err = mCodec->configureCodec(mime.c_str(), msg);
+      if(!strcasecmp(mCodec->mComponentName.c_str(), "OMX.sprd.mp3.encoder")){
+            msg->setInt32("sprdmp3-encoder", 1);
+            ALOGI("ACodec::LoadedState onConfigureComponent sprd.mp3.encoder");
+       }
+       err = mCodec->configureCodec(mime.c_str(), msg);
     }
     if (err != OK) {
         ALOGE("[%s] configureCodec returning error %d",

@@ -30,9 +30,22 @@ cc_binary {
         "libbinder",
         "libdl",
         "libselinux",
+        "libcutils",
     ],
 
     static_libs: ["libdrmframeworkcommon"],
+
+    arch: {
+        arm64: {
+            cflags: ["-DTARGET_64"],
+        },
+        x86_64: {
+            cflags: ["-DTARGET_64"],
+        },
+        mips64: {
+            cflags: ["-DTARGET_64"],
+        },
+    },
 
     cflags: [
         "-Wall",
@@ -40,7 +53,7 @@ cc_binary {
         "-Werror",
     ],
 
-    compile_multilib: "32",
+    //compile_multilib: "32",
 
     init_rc: ["drmserver.rc"],
 }

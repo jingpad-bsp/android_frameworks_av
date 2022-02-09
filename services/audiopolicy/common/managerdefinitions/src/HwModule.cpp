@@ -348,6 +348,147 @@ sp<DeviceDescriptor> HwModuleCollection::getDeviceDescriptor(const audio_devices
     return createDevice(deviceType, address, name, encodedFormat);
 }
 
+//add for usb offload
+sp<DeviceDescriptor> HwModuleCollection::getDeviceDescriptor(const audio_devices_t deviceType,
+                                                             const char *address,
+                                                             const char *name,
+                                                             const audio_format_t encodedFormat,
+                                                             int custom_config,
+                                                             bool allowToCreate,
+                                                             bool matchAddress) const
+{
+    String8 devAddress = (address == nullptr || !matchAddress) ? String8("") : String8(address);
+    ALOGI("getDeviceDescriptor custom_config:%d %x",custom_config,deviceType);
+
+    bool is_usb_device=false;
+    bool is_usboffload=false;
+    if((deviceType ==  AUDIO_DEVICE_OUT_USB_DEVICE)
+        ||(deviceType ==  AUDIO_DEVICE_OUT_USB_HEADSET)
+        ||(deviceType ==  AUDIO_DEVICE_IN_USB_DEVICE)
+        ||(deviceType ==  AUDIO_DEVICE_IN_USB_HEADSET)){
+        is_usb_device=true;
+        if(custom_config){
+            is_usboffload=true;
+        }else{
+            is_usboffload=false;
+        }
+    }
+
+    // handle legacy remote submix case where the address was not always specified
+    if (device_distinguishes_on_address(deviceType) && (devAddress.length() == 0)) {
+        devAddress = String8("0");
+    }
+
+    for (const auto& hwModule : *this) {
+        DeviceVector moduleDevices = hwModule->getAllDevices();
+        auto moduleDevice = moduleDevices.getDevice(deviceType, devAddress, encodedFormat);
+        if (moduleDevice) {
+
+            if(true==is_usb_device){
+                if(false==is_usboffload){
+                    if(getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY)==hwModule){
+                        ALOGI("getDeviceDescriptor do not use usb with primary hal");
+                        continue;
+                    }
+                }else{
+                    if(getModuleFromName(AUDIO_HARDWARE_MODULE_ID_USB)==hwModule){
+                        ALOGI("getDeviceDescriptor do not use usb with usb hal");
+                        continue;
+                    }
+                }
+            }
+
+            if (encodedFormat != AUDIO_FORMAT_DEFAULT) {
+                moduleDevice->setEncodedFormat(encodedFormat);
+            }
+            moduleDevice->setAddress(devAddress);
+            if (allowToCreate) {
+                moduleDevice->attach(hwModule);
+            }
+            return moduleDevice;
+        }
+    }
+    if (!allowToCreate) {
+        ALOGI("%s: could not find HW module for device %s %04x address %s", __FUNCTION__,
+              name, deviceType, address);
+        return nullptr;
+    }
+
+    auto device = createDevice(deviceType, address, name, encodedFormat,custom_config);
+
+    if(true==is_usb_device){
+        device->setoffload(is_usboffload);
+    } else {
+        device->setoffload(false);
+    }
+
+    return device;
+}
+
+sp<DeviceDescriptor> HwModuleCollection::createDevice(const audio_devices_t type,
+                                                      const char *address,
+                                                      const char *name,
+                                                      const audio_format_t encodedFormat,
+                                                      int custom_config) const
+{
+    sp<HwModule> hwModule;
+    sp<DeviceDescriptor> device = new DeviceDescriptor(type, String8(name));
+    device->setName(String8(name));
+    device->setAddress(String8(address));
+    device->setEncodedFormat(encodedFormat);
+
+    if((type ==  AUDIO_DEVICE_OUT_USB_DEVICE)
+        ||(type ==  AUDIO_DEVICE_OUT_USB_HEADSET)
+        ||(type ==  AUDIO_DEVICE_IN_USB_DEVICE)
+        ||(type ==  AUDIO_DEVICE_IN_USB_HEADSET)){
+        if(custom_config){
+            hwModule=getModuleFromName(AUDIO_HARDWARE_MODULE_ID_PRIMARY);
+        }else{
+            hwModule=getModuleFromName(AUDIO_HARDWARE_MODULE_ID_USB);
+        }
+        if (hwModule == 0) {
+            ALOGE("%s: could not find HW module for usbdevice %04x address %s", __FUNCTION__, type,
+                address);
+            hwModule=getModuleForDeviceTypes(type, encodedFormat);
+        }
+    }else{
+        hwModule=getModuleForDeviceTypes(type, encodedFormat);
+    }
+
+    if (hwModule == 0) {
+        ALOGE("%s: could not find HW module for device %04x address %s", __FUNCTION__, type,
+            address);
+        return nullptr;
+    }
+
+  // Add the device to the list of dynamic devices
+    hwModule->addDynamicDevice(device);
+    // Reciprocally attach the device to the module
+    device->attach(hwModule);
+    ALOGI("%s: adding dynamic device %s to module %s", __FUNCTION__,
+          device->toString().c_str(), hwModule->getName());
+
+    const auto &profiles = (audio_is_output_device(type) ? hwModule->getOutputProfiles() :
+                                                             hwModule->getInputProfiles());
+    for (const auto &profile : profiles) {
+        // Add the device as supported to all profile supporting "weakly" or not the device
+        // according to its type
+        if (profile->supportsDevice(device, false /*matchAdress*/)) {
+
+            // @todo quid of audio profile? import the profile from device of the same type?
+            const auto &isoTypeDeviceForProfile =
+                profile->getSupportedDevices().getDevice(type, String8(), AUDIO_FORMAT_DEFAULT);
+            device->importAudioPort(isoTypeDeviceForProfile, true /* force */);
+
+            ALOGV("%s: adding device %s to profile %s", __FUNCTION__,
+                  device->toString().c_str(), profile->getTagName().c_str());
+            profile->addSupportedDevice(device);
+        }
+    }
+
+    return device;
+}
+
 sp<DeviceDescriptor> HwModuleCollection::createDevice(const audio_devices_t type,
                                                       const char *address,
                                                       const char *name,
@@ -388,6 +529,7 @@ sp<DeviceDescriptor> HwModuleCollection::createDevice(const audio_devices_t type
             profile->addSupportedDevice(device);
         }
     }
+
     return device;
 }
 

@@ -706,7 +706,11 @@ protected:
 
         DeviceVector  mAvailableOutputDevices; // all available output devices
         DeviceVector  mAvailableInputDevices;  // all available input devices
-
+#ifdef AUDIO_WHALE
+        int isUsbRecordSupported;
+        int isUsboffloadSupported;
+        int isA2dpoffloadSupported;
+#endif
         bool    mLimitRingtoneVolume;        // limit ringtone volume to music volume if headset connected
 
         float   mLastVoiceVolume;            // last voice volume value sent to audio HAL

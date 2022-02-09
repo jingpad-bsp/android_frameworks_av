@@ -67,6 +67,7 @@ cc_library_shared {
         "utils/ExifUtils.cpp",
         "utils/TagMonitor.cpp",
         "utils/LatencyHistogram.cpp",
+       ":unisoc_libcameraservice",
     ],
 
     shared_libs: [
@@ -96,6 +97,7 @@ cc_library_shared {
         "libstagefright",
         "libstagefright_foundation",
         "libyuv",
+        "libpowermanager",
         "android.frameworks.cameraservice.common@2.0",
         "android.frameworks.cameraservice.service@2.0",
         "android.frameworks.cameraservice.device@2.0",
@@ -122,8 +124,10 @@ cc_library_shared {
         "frameworks/av/media/ndk",
         "external/dynamic_depth/includes",
         "external/dynamic_depth/internal",
+        "vendor/sprd/modules/libcamera/include",
+        "frameworks/av/include/camera/cameraEx",
+        "vendor/sprd/platform/frameworks/av/service/camera/libcameraservice",
     ],
-
     export_include_dirs: ["."],
 
     cflags: [
@@ -131,6 +135,21 @@ cc_library_shared {
         "-Wextra",
         "-Werror",
         "-Wno-ignored-qualifiers",
+        "-DSPRD_FRAMEWORKS_CAMERA_EX",
+        "-DCONFIG_CAMERA_SPRD_EIS",
+        "-DSPRD_SLOWMOTION_OPTIMIZE",
+        "-DSPRD_FEATURE_COVERED_SENSOR",
+        "-DSPRD_FEATURE_ZSL",
+        "-DSPRD_FEATURE_BRIGHTNESS",
+        "-DSPRD_FEATURE_CONTRAST",
+        "-DSPRD_FEATURE_SATURATION",
+        "-DSPRD_FEATURE_METERING_MODE",
+        "-DSPRD_FEATURE_ISO",
+        "-DSPRD_FEATURE_SLOW_MOTION",
+        "-DSPRD_FEATURE_3GVT",
+        "-DSPRD_FEATURE_BEAUTY",
+        "-DSPRD_FEATURE_EIS",
+        "-DSPRD_FEATURE_3DNR",
     ],
 
 }

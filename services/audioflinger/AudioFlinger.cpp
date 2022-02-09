@@ -73,6 +73,7 @@
 #include <BufLog.h>
 
 #include "TypedLogger.h"
+#define AUDIO_HARDWARE_MODULE_ID_BLUETOOTH "bluetooth"
 
 // ----------------------------------------------------------------------------
 
@@ -174,6 +175,12 @@ AudioFlinger::AudioFlinger()
         mNextUniqueIds[use] = AUDIO_UNIQUE_ID_USE_MAX;
     }
 
+    /* get property and set mSYSTEM_READY */
+    const bool systemreadyStatus = property_get_bool("af.media.systemready.state", false);
+    if (systemreadyStatus) {
+       mSystemReady = true;
+    }
+
     const bool doLog = property_get_bool("ro.test_harness", false);
     if (doLog) {
         mLogMemoryDealer = new MemoryDealer(kLogMemorySize, "LogWriters",
@@ -190,6 +197,8 @@ AudioFlinger::AudioFlinger()
     mEffectsFactoryHal = EffectsFactoryHalInterface::create();
 
     mMediaLogNotifier->run("MediaLogNotifier");
+
+    setIsUseAudioWhaleHal(property_get_bool("ro.audio.whale_hal", false));
 }
 
 void AudioFlinger::onFirstRef()
@@ -753,7 +762,62 @@ sp<IAudioTrack> AudioFlinger::createTrack(const CreateTrackInput& input,
     }
 
     {
+        size_t newframeCount = input.frameCount;
         Mutex::Autolock _l(mLock);
+        if(((input.flags & AUDIO_OUTPUT_FLAG_FAST)==0)
+            &&(input.attr.usage == AUDIO_USAGE_VOICE_COMMUNICATION)
+            &&(input.config.sample_rate==16000)
+            && (input.speed == 1.0f)) {
+            size_t tempMinFrameCount = 0;
+            uint32_t mprimaryAfLatency;
+            size_t mprimaryAfFrameCount;
+            uint32_t mprimaryAfSampleRate;
+
+            uint32_t ma2dpAfLatency;
+            size_t ma2dpAfFrameCount;
+
+            size_t minFrameCount = 0;
+            {
+                PlaybackThread *primary_thread=primaryPlaybackThread_l();
+                sp<PlaybackThread> t;
+                for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
+                    t = mPlaybackThreads.valueAt(i);
+                    if ( t->isDuplicating()) {
+                        continue;
+                    }
+
+                    if((AUDIO_DEVICE_OUT_BLUETOOTH_A2DP|AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_HEADPHONES|AUDIO_DEVICE_OUT_BLUETOOTH_A2DP_SPEAKER)
+                        &t->getDevice()){
+                        ma2dpAfLatency=t->latency();
+                        ma2dpAfFrameCount=t->frameCountHAL();
+
+                        tempMinFrameCount = AudioSystem::calculateMinFrameCount(ma2dpAfLatency, ma2dpAfFrameCount,
+                                            t->sampleRate(), input.config.sample_rate, input.speed /*, 0 mNotificationsPerBufferReq*/);
+                        break;
+                    }
+                }
+
+                if(NULL!=primary_thread){
+                    mprimaryAfLatency=primary_thread->latency();
+                    mprimaryAfFrameCount=primary_thread->frameCountHAL();
+                    mprimaryAfSampleRate=primary_thread->sampleRate();
+
+                    minFrameCount = AudioSystem::calculateMinFrameCount(mprimaryAfLatency, mprimaryAfFrameCount,
+                                        mprimaryAfSampleRate,input.config.sample_rate, input.speed /*, 0 mNotificationsPerBufferReq*/);
+
+
+                }
+
+                if((tempMinFrameCount != 0)
+                && (minFrameCount != 0)
+                 && (tempMinFrameCount != minFrameCount)) {
+                    if((input.frameCount % tempMinFrameCount) == 0){
+                        newframeCount = (newframeCount*minFrameCount)/tempMinFrameCount;
+                    }
+                }
+            }
+         }
+
         PlaybackThread *thread = checkPlaybackThread_l(output.outputId);
         if (thread == NULL) {
             ALOGE("no playback thread found for output handle %d", output.outputId);
@@ -779,7 +843,11 @@ sp<IAudioTrack> AudioFlinger::createTrack(const CreateTrackInput& input,
         ALOGV("createTrack() sessionId: %d", sessionId);
 
         output.sampleRate = input.config.sample_rate;
-        output.frameCount = input.frameCount;
+        if(newframeCount>0){
+            output.frameCount = newframeCount;
+        }else{
+            output.frameCount = input.frameCount;
+        }
         output.notificationFrameCount = input.notificationFrameCount;
         output.flags = input.flags;
 
@@ -1054,6 +1122,7 @@ status_t AudioFlinger::setMasterBalance(float balance)
 status_t AudioFlinger::setMode(audio_mode_t mode)
 {
     status_t ret = initCheck();
+
     if (ret != NO_ERROR) {
         return ret;
     }
@@ -1067,6 +1136,18 @@ status_t AudioFlinger::setMode(audio_mode_t mode)
         return BAD_VALUE;
     }
 
+    if (isUseAudioWhaleHal()) {
+        if(2==mode) {
+            for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
+                AudioHwDevice *audioHwDevice = mAudioHwDevs.valueAt(i);
+                if (strncmp(mAudioHwDevs.valueAt(i)->moduleName(), AUDIO_HARDWARE_MODULE_ID_BLUETOOTH, strlen(AUDIO_HARDWARE_MODULE_ID_BLUETOOTH)) == 0){
+                    sp<DeviceHalInterface> dev = audioHwDevice->hwDevice();
+                    ALOGI("A2dp setMode:%d",mode);
+                    dev->setParameters(String8("setMode=2"));
+                }
+            }
+        }
+    }
     { // scope for the lock
         AutoMutex lock(mHardwareLock);
         sp<DeviceHalInterface> dev = mPrimaryHardwareDev->hwDevice();
@@ -1081,7 +1162,18 @@ status_t AudioFlinger::setMode(audio_mode_t mode)
         for (size_t i = 0; i < mPlaybackThreads.size(); i++)
             mPlaybackThreads.valueAt(i)->setMode(mode);
     }
-
+    if (isUseAudioWhaleHal()) {
+        if(0==mode) {
+            for (size_t i = 0; i < mAudioHwDevs.size(); i++) {
+                AudioHwDevice *audioHwDevice = mAudioHwDevs.valueAt(i);
+                if (strncmp(mAudioHwDevs.valueAt(i)->moduleName(), AUDIO_HARDWARE_MODULE_ID_BLUETOOTH, strlen(AUDIO_HARDWARE_MODULE_ID_BLUETOOTH)) == 0){
+                    sp<DeviceHalInterface> dev = audioHwDevice->hwDevice();
+                    ALOGI("A2dp setMode:%d",mode);
+                    dev->setParameters(String8("setMode=0"));
+                }
+            }
+        }
+    }
     return ret;
 }
 
@@ -1933,7 +2025,8 @@ sp<media::IAudioRecord> AudioFlinger::createRecord(const CreateRecordInput& inpu
                                                   &output.notificationFrameCount,
                                                   callingPid, clientUid, &output.flags,
                                                   input.clientInfo.clientTid,
-                                                  &lStatus, portId);
+                                                  &lStatus, portId,
+                                                  input.opPackageName);
         LOG_ALWAYS_FATAL_IF((lStatus == NO_ERROR) && (recordTrack == 0));
 
         // lStatus == BAD_TYPE means FAST flag was rejected: request a new input from
@@ -2115,7 +2208,7 @@ status_t AudioFlinger::setLowRamDevice(bool isLowRamDevice, int64_t totalMemory)
     // though actual setting is determined through device configuration.
     constexpr int64_t GB = 1024 * 1024 * 1024;
     mClientSharedHeapSize =
-            isLowRamDevice ? kMinimumClientSharedHeapSizeBytes
+            isLowRamDevice ? kMinimumClientSharedHeapSizeBytes + 512 * 1024
                     : mTotalMemory < 2 * GB ? 4 * kMinimumClientSharedHeapSizeBytes
                     : mTotalMemory < 3 * GB ? 8 * kMinimumClientSharedHeapSizeBytes
                     : mTotalMemory < 4 * GB ? 16 * kMinimumClientSharedHeapSizeBytes
@@ -2233,6 +2326,10 @@ status_t AudioFlinger::systemReady()
         return NO_ERROR;
     }
     mSystemReady = true;
+    /* set systemready proporty , get systemready when AudioFlinger construct
+     * To solve: when restart audioserver getPowerManager_l will be null.
+    */
+    property_set("af.media.systemready.state", "true");
     for (size_t i = 0; i < mPlaybackThreads.size(); i++) {
         ThreadBase *thread = (ThreadBase *)mPlaybackThreads.valueAt(i).get();
         thread->systemReady();

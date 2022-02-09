@@ -951,6 +951,23 @@ binder::Status CameraDeviceClient::createStream(
         surfaces.push_back(surface);
     }
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    int width = streamInfo.width;
+    int height = streamInfo.height;
+
+    if (outputConfiguration.isSprd()) {
+        width = outputConfiguration.getWidth();
+        height = outputConfiguration.getHeight();
+    }
+    if (outputConfiguration.isEIS()) {
+        if ((streamInfo.format == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED) &&
+                (streamInfo.consumerUsage & GraphicBuffer::USAGE_HW_VIDEO_ENCODER)) {
+            width = outputConfiguration.getWidth() + 2;
+            height = outputConfiguration.getHeight();
+        }
+    }
+#endif
+
     int streamId = camera3::CAMERA3_STREAM_ID_INVALID;
     std::vector<int> surfaceIds;
     bool isDepthCompositeStream = camera3::DepthCompositeStream::isDepthCompositeStream(surfaces[0]);
@@ -973,18 +990,33 @@ binder::Status CameraDeviceClient::createStream(
                     compositeStream);
         }
     } else {
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+        err = mDevice->createStream(surfaces, deferredConsumer, width,
+                height, streamInfo.format, streamInfo.dataSpace,
+                static_cast<camera3_stream_rotation_t>(outputConfiguration.getRotation()),
+                &streamId, physicalCameraId, &surfaceIds, outputConfiguration.getSurfaceSetID(),
+                isShared);
+#else
         err = mDevice->createStream(surfaces, deferredConsumer, streamInfo.width,
                 streamInfo.height, streamInfo.format, streamInfo.dataSpace,
                 static_cast<camera3_stream_rotation_t>(outputConfiguration.getRotation()),
                 &streamId, physicalCameraId, &surfaceIds, outputConfiguration.getSurfaceSetID(),
                 isShared);
+#endif
     }
 
     if (err != OK) {
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+        res = STATUS_ERROR_FMT(CameraService::ERROR_INVALID_OPERATION,
+                "Camera %s: Error creating output stream (%d x %d, fmt %x, dataSpace %x): %s (%d)",
+                mCameraIdStr.string(), width, height, streamInfo.format,
+                streamInfo.dataSpace, strerror(-err), err);
+#else
         res = STATUS_ERROR_FMT(CameraService::ERROR_INVALID_OPERATION,
                 "Camera %s: Error creating output stream (%d x %d, fmt %x, dataSpace %x): %s (%d)",
                 mCameraIdStr.string(), streamInfo.width, streamInfo.height, streamInfo.format,
                 streamInfo.dataSpace, strerror(-err), err);
+#endif
     } else {
         int i = 0;
         for (auto& binder : binders) {
@@ -997,10 +1029,17 @@ binder::Status CameraDeviceClient::createStream(
         mConfiguredOutputs.add(streamId, outputConfiguration);
         mStreamInfoMap[streamId] = streamInfo;
 
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+        ALOGV("%s: Camera %s: Successfully created a new stream ID %d for output surface"
+                    " (%d x %d) with format 0x%x.",
+                  __FUNCTION__, mCameraIdStr.string(), streamId, width,
+                  height, streamInfo.format);
+#else
         ALOGV("%s: Camera %s: Successfully created a new stream ID %d for output surface"
                     " (%d x %d) with format 0x%x.",
                   __FUNCTION__, mCameraIdStr.string(), streamId, streamInfo.width,
                   streamInfo.height, streamInfo.format);
+#endif
 
         // Set transform flags to ensure preview to be rotated correctly.
         res = setStreamTransformLocked(streamId);

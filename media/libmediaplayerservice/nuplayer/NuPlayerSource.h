@@ -58,6 +58,7 @@ struct NuPlayer::Source : public AHandler {
         kWhatInstantiateSecureDecoders,
         // Modular DRM
         kWhatDrmInfo,
+        kWhatSeekDone = 'sdon',
     };
 
     // The provides message is used to notify the player about various
@@ -76,6 +77,7 @@ struct NuPlayer::Source : public AHandler {
     virtual void stop() {}
     virtual void pause() {}
     virtual void resume() {}
+    virtual void complete() {}
 
     // Explicitly disconnect the underling data source
     virtual void disconnect() {}
@@ -130,6 +132,8 @@ struct NuPlayer::Source : public AHandler {
     }
 
     virtual void setOffloadAudio(bool /* offload */) {}
+
+    virtual void setNeedConsume(bool /* needConsume */) {}
 
     // Modular DRM
     virtual status_t prepareDrm(

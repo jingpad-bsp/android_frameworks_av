@@ -116,14 +116,6 @@ ARTPAssembler::AssemblyStatus AH263Assembler::addPacket(
         return MALFORMED_PACKET;
     }
 
-    // PLEN=0
-    if (PLEN != 0u) {
-        queue->erase(queue->begin());
-        ++mNextExpectedSeqNo;
-        ALOGW("Packet discarded (PLEN != 0)");
-        return MALFORMED_PACKET;
-    }
-
     // PEBIT=0
     if (PEBIT != 0u) {
         queue->erase(queue->begin());

@@ -70,7 +70,7 @@ void LVC_Core_MixSoft_1St_2i_D16C31_WRA( LVMixer3_FLOAT_st        *ptrInstance1,
     {
         if(CurrentL < TargetL)
         {
-            ADD2_SAT_FLOAT(CurrentL, DeltaL, Temp);
+            Temp = ADD2_SAT_FLOAT(CurrentL, DeltaL, Temp);
             CurrentL = Temp;
             if (CurrentL > TargetL)
                 CurrentL = TargetL;
@@ -84,7 +84,7 @@ void LVC_Core_MixSoft_1St_2i_D16C31_WRA( LVMixer3_FLOAT_st        *ptrInstance1,
 
         if(CurrentR < TargetR)
         {
-            ADD2_SAT_FLOAT(CurrentR, DeltaR, Temp);
+            Temp = ADD2_SAT_FLOAT(CurrentR, DeltaR, Temp);
             CurrentR = Temp;
             if (CurrentR > TargetR)
                 CurrentR = TargetR;
@@ -107,7 +107,7 @@ void LVC_Core_MixSoft_1St_2i_D16C31_WRA( LVMixer3_FLOAT_st        *ptrInstance1,
     {
         if(CurrentL < TargetL)
         {
-            ADD2_SAT_FLOAT(CurrentL, DeltaL, Temp);
+            Temp = ADD2_SAT_FLOAT(CurrentL, DeltaL, Temp);
             CurrentL = Temp;
             if (CurrentL > TargetL)
                 CurrentL = TargetL;
@@ -121,7 +121,7 @@ void LVC_Core_MixSoft_1St_2i_D16C31_WRA( LVMixer3_FLOAT_st        *ptrInstance1,
 
         if(CurrentR < TargetR)
         {
-            ADD2_SAT_FLOAT(CurrentR, DeltaR, Temp);
+            Temp = ADD2_SAT_FLOAT(CurrentR, DeltaR, Temp);
             CurrentR = Temp;
             if (CurrentR > TargetR)
                 CurrentR = TargetR;

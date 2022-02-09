@@ -24,6 +24,9 @@
 #include "common/CameraDeviceBase.h"
 #include "api1/Camera2Client.h"
 #include "api1/client2/FrameProcessor.h"
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "SprdCamera3Tags.h"
+#endif
 
 namespace android {
 namespace camera2 {
@@ -85,6 +88,16 @@ bool FrameProcessor::processSingleFrame(CaptureResult &frame,
     if (mSynthesize3ANotify) {
         process3aState(frame, client);
     }
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+    {
+        camera_metadata_entry_t entry;
+        entry = frame.mMetadata.find(ANDROID_SPRD_IS_TAKEPICTURE_WITH_FLASH);
+        if (entry.count > 0) {
+            ALOGV("isTakePictureWithFlash = %d", entry.data.u8[0]);
+            client->updateIsTakePictureWithFlashParamToAppEx(entry.data.u8[0]);
+        }
+    }
+#endif
 
     return FrameProcessorBase::processSingleFrame(frame, device);
 }

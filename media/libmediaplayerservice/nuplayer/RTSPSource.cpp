@@ -76,6 +76,7 @@ NuPlayer::RTSPSource::RTSPSource(
             mExtraHeaders.removeItemsAt(index);
         }
     }
+    mIsSeeking = false;
 }
 
 NuPlayer::RTSPSource::~RTSPSource() {
@@ -203,6 +204,10 @@ bool NuPlayer::RTSPSource::haveSufficientDataOnAllTracks() {
 
 status_t NuPlayer::RTSPSource::dequeueAccessUnit(
         bool audio, sp<ABuffer> *accessUnit) {
+    if (mIsSeeking) {
+        return -EWOULDBLOCK;
+    }
+
     if (!stopBufferingIfNecessary()) {
         return -EWOULDBLOCK;
     }
@@ -300,13 +305,9 @@ status_t NuPlayer::RTSPSource::seekTo(int64_t seekTimeUs, MediaPlayerSeekMode mo
     msg->setInt64("timeUs", seekTimeUs);
     msg->setInt32("mode", mode);
 
-    sp<AMessage> response;
-    status_t err = msg->postAndAwaitResponse(&response);
-    if (err == OK && response != NULL) {
-        CHECK(response->findInt32("err", &err));
-    }
-
-    return err;
+    mIsSeeking = true;
+    msg->post(200000ll);
+    return OK;
 }
 
 void NuPlayer::RTSPSource::performSeek(int64_t seekTimeUs) {
@@ -485,7 +486,6 @@ void NuPlayer::RTSPSource::onMessageReceived(const sp<AMessage> &msg) {
     } else if (msg->what() == kWhatPerformSeek) {
         int32_t generation;
         CHECK(msg->findInt32("generation", &generation));
-        CHECK(msg->senderAwaitsResponse(&mSeekReplyID));
 
         if (generation != mSeekGeneration) {
             // obsolete.
@@ -546,6 +546,7 @@ void NuPlayer::RTSPSource::onMessageReceived(const sp<AMessage> &msg) {
             mState = CONNECTED;
             // Unblock seekTo here in case we attempted to seek in a live stream
             finishSeek(OK);
+            ALOGI("received kWhatSeekDone from MyHandler");
             break;
         }
 
@@ -567,6 +568,7 @@ void NuPlayer::RTSPSource::onMessageReceived(const sp<AMessage> &msg) {
             status_t err = OK;
             msg->findInt32("err", &err);
 
+            ALOGI("received kWhatSeekPaused, err: %d", err);
             if (err == OK) {
                 int64_t timeUs;
                 CHECK(msg->findInt64("time", &timeUs));
@@ -892,13 +894,11 @@ bool NuPlayer::RTSPSource::stopBufferingIfNecessary() {
 }
 
 void NuPlayer::RTSPSource::finishSeek(status_t err) {
-    if (mSeekReplyID == NULL) {
-        return;
-    }
-    sp<AMessage> seekReply = new AMessage;
-    seekReply->setInt32("err", err);
-    seekReply->postReply(mSeekReplyID);
-    mSeekReplyID = NULL;
+    sp<AMessage> notify = dupNotify();
+    notify->setInt32("what", kWhatSeekDone);
+    notify->setInt32("result", err);
+    notify->post();
+    mIsSeeking = false;
 }
 
 }  // namespace android

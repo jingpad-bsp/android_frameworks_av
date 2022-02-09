@@ -42,6 +42,7 @@ public:
     virtual media_status_t getTrackMetaData(AMediaFormat *meta, size_t index, uint32_t flags);
 
     virtual media_status_t getMetaData(AMediaFormat *meta);
+    bool TestVBR(DataSourceHelper *source, int *avg_bitrate, uint32_t match_header,off64_t inout_pos);
     virtual const char * name() { return "MP3Extractor"; }
 
 private:
@@ -52,6 +53,7 @@ private:
     AMediaFormat *mMeta;
     uint32_t mFixedHeader;
     MP3Seeker *mSeeker;
+    bool mIsVbr;
 
     MP3Extractor(const MP3Extractor &);
     MP3Extractor &operator=(const MP3Extractor &);

@@ -1,7 +1,39 @@
+/// add start
+bootstrap_go_package {
+    // name and pkgPath need to  according to your module
+    name: "soong-audioflinger_defaults",
+    pkgPath: "android/soong/audioflinger_defaults",
+    deps: [
+        "blueprint",
+        "blueprint-pathtools",
+        "soong",
+        "soong-android",
+        "soong-cc",
+        "soong-genrule",
+    ],
+    srcs: [
+          "audioflinger.go",
+    ],
+    pluginFor: ["soong_build"],
+}
+
+audioflinger_defaults {
+    name: "audioflinger_Default_module",
+}
+
+cc_defaults {
+    name: "audioflinger_defaults",
+    defaults: ["audioflinger_Default_module"],
+    sanitize: {
+        misc_undefined: ["integer"],
+    },
+}
 
 
 cc_library_shared {
     name: "libaudioflinger",
+
+    defaults: ["audioflinger_defaults"],
 
     srcs: [
         "AudioFlinger.cpp",

@@ -52,6 +52,8 @@ DeviceDescriptor::DeviceDescriptor(audio_devices_t type, const FormatVector &enc
         mEncodedFormats.add(AUDIO_FORMAT_AC3);
         mEncodedFormats.add(AUDIO_FORMAT_IEC61937);
     }
+
+    SupportUsbOffload=false;
 }
 
 audio_port_handle_t DeviceDescriptor::getId() const

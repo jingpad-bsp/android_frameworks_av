@@ -139,6 +139,7 @@ private:
     int64_t mTargetTimeUs;
     size_t mNumFrames;
     size_t mNumFramesDecoded;
+    bool mIsInterlaceFrame;
 };
 
 struct ImageDecoder : public FrameDecoder {

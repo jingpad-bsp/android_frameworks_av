@@ -22,6 +22,7 @@
 #include <media/stagefright/FileSource.h>
 #include <media/stagefright/Utils.h>
 #include <private/android_filesystem_config.h>
+#include <cutils/properties.h>
 
 namespace android {
 
@@ -110,6 +111,11 @@ sp<DecryptHandle> FileSource::DrmInitialization(const char *mime) {
     return mDecryptHandle;
 }
 
+void FileSource::getDrmInfo(sp<DecryptHandle> &handle, DrmManagerClient **client) {
+    handle = mDecryptHandle;
+    *client = mDrmManagerClient;
+}
+
 ssize_t FileSource::readAtDRM_l(off64_t offset, void *data, size_t size) {
     size_t DRM_CACHE_SIZE = 1024;
     if (mDrmBuf == NULL) {
@@ -152,5 +158,35 @@ bool FileSource::requiresDrm(int fd, int64_t offset, int64_t length, const char 
     }
     return requiresDrm;
 }
+
+#define GET_SIZE_MAGIC 0xDEADBEEF
+status_t FileSource::getSize(off64_t *size) {
+    Mutex::Autolock autoLock(mLock);
+
+    if (mFd < 0) {
+        return NO_INIT;
+    }
+
+    char value[PROPERTY_VALUE_MAX];
+    if ((property_get("drm.service.enabled", value, "false") != 0) && (!(strcmp(value, "true")))) {
+        if (mDecryptHandle != NULL && DecryptApiType::CONTAINER_BASED == mDecryptHandle->decryptApiType) {
+            if(mContainerBasedDrmLength == -1) {
+                ALOGE("FileSource getSize !");
+                char tmp;
+                *size = mDrmManagerClient->pread(mDecryptHandle, &tmp, 1, GET_SIZE_MAGIC);
+                mContainerBasedDrmLength = *size;
+            } else {
+                *size = mContainerBasedDrmLength;
+            }
+        } else {
+            *size = mLength;
+        }
+    } else {
+        *size = mLength;
+    }
+
+    return OK;
+}
+
 
 }  // namespace android

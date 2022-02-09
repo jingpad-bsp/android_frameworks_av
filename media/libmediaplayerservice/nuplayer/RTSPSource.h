@@ -127,7 +127,7 @@ private:
     int64_t mEOSTimeoutAudio;
     int64_t mEOSTimeoutVideo;
 
-    sp<AReplyToken> mSeekReplyID;
+    bool mIsSeeking;
 
     sp<AnotherPacketSource> getSource(bool audio);
 

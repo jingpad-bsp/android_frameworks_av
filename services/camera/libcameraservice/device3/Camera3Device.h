@@ -48,6 +48,8 @@
 #include "utils/TagMonitor.h"
 #include "utils/LatencyHistogram.h"
 #include <camera_metadata_hidden.h>
+#include <powermanager/IPowerManager.h>
+#include "powermanager/PowerManager.h"
 
 using android::camera3::OutputStreamInfo;
 
@@ -163,6 +165,14 @@ class Camera3Device :
     status_t addBufferListenerForStream(int streamId,
             wp<camera3::Camera3StreamBufferListener> listener) override;
 
+#ifdef  SPRD_FRAMEWORKS_CAMERA_EX
+#include "device3/Camera3DeviceEx.h"
+#endif
+#ifdef SPRD_SLOWMOTION_OPTIMIZE
+    int   mslowmotion;
+    int   mslowmotionCnt;
+#endif
+
     status_t prepare(int maxCount, int streamId) override;
 
     ssize_t getJpegBufferSize(uint32_t width, uint32_t height) const override;
@@ -197,6 +207,7 @@ class Camera3Device :
     /**
      * Helper functions to map between framework and HIDL values
      */
+ 
     static hardware::graphics::common::V1_0::PixelFormat mapToPixelFormat(int frameworkFormat);
     static hardware::camera::device::V3_2::DataspaceFlags mapToHidlDataspace(
             android_dataspace dataSpace);
@@ -223,7 +234,7 @@ class Camera3Device :
     // internal typedefs
     using RequestMetadataQueue = hardware::MessageQueue<uint8_t, hardware::kSynchronizedReadWrite>;
     using ResultMetadataQueue  = hardware::MessageQueue<uint8_t, hardware::kSynchronizedReadWrite>;
-
+    sp<IPowerManager>          mPowerManager;
     static const size_t        kDumpLockAttempts  = 10;
     static const size_t        kDumpSleepDuration = 100000; // 0.10 sec
     static const nsecs_t       kActiveTimeout     = 500000000;  // 500 ms
@@ -259,6 +270,8 @@ class Camera3Device :
     int                        mOperatingMode;
     // Current session wide parameters
     hardware::camera2::impl::CameraMetadataNative mSessionParams;
+
+    static int                 mSunlightFlag;
 
     // Constant to use for no set operating mode
     static const int           NO_MODE = -1;
@@ -838,7 +851,9 @@ class Camera3Device :
         }
 
         void signalPipelineDrain(const std::vector<int>& streamIds);
-
+#ifdef SPRD_FRAMEWORKS_CAMERA_EX
+#include "device3/Camera3DeviceRequestThreadEx.h"
+#endif
       protected:
 
         virtual bool threadLoop();
@@ -1367,6 +1382,12 @@ class Camera3Device :
     // Fix up result metadata for monochrome camera.
     bool mNeedFixupMonochromeTags;
     status_t fixupMonochromeTags(const CameraMetadata& deviceInfo, CameraMetadata& resultMetadata);
+
+#ifdef CONFIG_CAMERA_SPRD_EIS
+    sp<ANativeWindow> mPrevWindow;
+    bool              mEisPreviewEnable = false;
+#endif
+
 }; // class Camera3Device
 
 }; // namespace android

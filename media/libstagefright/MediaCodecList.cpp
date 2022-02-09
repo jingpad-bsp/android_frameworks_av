@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 //#define LOG_NDEBUG 0
+#define PROCESS_NAME_MAX_SIZE 100
 #define LOG_TAG "MediaCodecList"
 #include <utils/Log.h>
 
@@ -34,6 +34,7 @@
 #include <media/stagefright/MediaErrors.h>
 #include <media/stagefright/OmxInfoBuilder.h>
 #include <media/stagefright/omx/OMXUtils.h>
+#include <media/stagefright/MediaCodec.h>
 #include <xmlparser/include/media/stagefright/xmlparser/MediaCodecsXmlParser.h>
 
 #include <sys/stat.h>
@@ -345,6 +346,10 @@ static int compareSoftwareCodecsFirst(const AString *name1, const AString *name2
 void MediaCodecList::findMatchingCodecs(
         const char *mime, bool encoder, uint32_t flags,
         Vector<AString> *matches) {
+    char proc_name[PROCESS_NAME_MAX_SIZE] = {0};
+    MediaCodec::getProcessName(getpid(), proc_name,sizeof(proc_name));
+    ALOGI("findMatchingCodecs called by %s, mime: %s, encoder: %d", proc_name, mime, encoder);
+
     matches->clear();
 
     const sp<IMediaCodecList> list = getInstance();
@@ -366,10 +371,21 @@ void MediaCodecList::findMatchingCodecs(
         const sp<MediaCodecInfo> info = list->getCodecInfo(matchIndex);
         CHECK(info != nullptr);
         AString componentName = info->getCodecName();
+        ALOGV("findMatchingCodecs match component name: %s", componentName.c_str());
 
         if ((flags & kHardwareCodecsOnly) && isSoftwareCodec(componentName)) {
             ALOGV("skipping SW codec '%s'", componentName.c_str());
+        } else if ((!strcmp(proc_name,"com.tencent.mm"))
+                && (!strcmp(mime, "video/hevc"))
+                && (!strcmp(componentName.c_str(),"c2.android.hevc.decoder"))) {
+            ALOGV("skip c2.android.hevc.decoder if called by com.tencent.mm");
+        } else if ((!strcmp(proc_name,"com.snapchat.android"))&&(!strcmp(componentName.c_str(),"OMX.sprd.h264.encoder"))){
+            ALOGV("skipping '%s'", componentName.c_str());
         } else {
+            if((!strncmp(proc_name, "com.tencent.mm", 21))&&(!strcmp(componentName.c_str(),"OMX.sprd.h264.encoder"))){
+                ALOGV("skipping '%s'", componentName.c_str());
+                continue;
+            }
             matches->push(componentName);
             ALOGV("matching '%s'", componentName.c_str());
         }

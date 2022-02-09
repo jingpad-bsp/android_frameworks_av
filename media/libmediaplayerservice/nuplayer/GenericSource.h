@@ -29,6 +29,7 @@
 namespace android {
 
 class DecryptHandle;
+class DrmManagerClient;
 struct AnotherPacketSource;
 struct ARTSPController;
 class DataSource;
@@ -65,6 +66,7 @@ struct NuPlayer::GenericSource : public NuPlayer::Source,
     virtual void stop();
     virtual void pause();
     virtual void resume();
+    virtual void complete();
 
     virtual void disconnect();
 
@@ -92,6 +94,8 @@ struct NuPlayer::GenericSource : public NuPlayer::Source,
             const uint8_t uuid[16], const Vector<uint8_t> &drmSessionId, sp<ICrypto> *outCrypto);
 
     virtual status_t releaseDrm();
+    virtual void setNeedConsume(bool needConsume);
+    virtual void setDrmPlaybackStatusIfNeeded(int playbackStatus, int64_t position);
 
 
 protected:
@@ -145,6 +149,7 @@ private:
     int32_t mFetchTimedTextDataGeneration;
     int64_t mDurationUs;
     bool mAudioIsVorbis;
+    bool mRequireDrm;
     // Secure codec is required.
     bool mIsSecure;
     bool mIsStreaming;
@@ -163,6 +168,8 @@ private:
     sp<NuCachedSource2> mCachedSource;
     sp<DataSource> mHttpSource;
     sp<MetaData> mFileMeta;
+    DrmManagerClient *mDrmManagerClient;
+    sp<DecryptHandle> mDecryptHandle;
     bool mStarted;
     bool mPreparing;
     int64_t mBitrate;
@@ -173,11 +180,13 @@ private:
     mutable Mutex mDisconnectLock; // Protects mDataSource, mHttpSource and mDisconnected
 
     sp<ALooper> mLooper;
+    bool mNeedConsume;
 
     void resetDataSource();
 
     status_t initFromDataSource();
     int64_t getLastReadPosition();
+    void checkDrmStatus(const sp<DataSource>& dataSource);
 
     void notifyPreparedAndCleanup(status_t err);
     void onSecureDecodersInstantiated(status_t err);

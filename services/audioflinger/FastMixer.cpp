@@ -419,6 +419,10 @@ void FastMixer::onWork()
                 strcpy(traceName, "fRdy");
                 traceName[4] = i + (i < 10 ? '0' : 'A' - 10);
                 traceName[5] = '\0';
+                if(framesReady>=INT32_MAX){
+                   ALOGI("%s line:%d framesReady:%zd INT32_MAX:%d",__func__,__LINE__,framesReady,INT32_MAX);
+                   framesReady=INT32_MAX;
+                }
                 ATRACE_INT(traceName, framesReady);
             }
             FastTrackDump *ftDump = &dumpState->mTracks[i];
@@ -501,7 +505,11 @@ void FastMixer::onWork()
         if (framesWritten >= 0) {
             ALOG_ASSERT((size_t) framesWritten <= frameCount);
             mTotalNativeFramesWritten += framesWritten;
-            dumpState->mFramesWritten = mTotalNativeFramesWritten;
+            if (mTotalNativeFramesWritten>=INT32_MAX){
+                dumpState->mFramesWritten = INT32_MAX;
+            } else {
+                dumpState->mFramesWritten = mTotalNativeFramesWritten;
+            }
             //if ((size_t) framesWritten == frameCount) {
             //    didFullWrite = true;
             //}

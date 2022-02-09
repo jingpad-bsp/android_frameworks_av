@@ -56,7 +56,8 @@ public:
 
     DeviceVector getOutputDevicesForAttributes(const audio_attributes_t &attr,
                                                const sp<DeviceDescriptor> &preferedDevice = nullptr,
-                                               bool fromCache = false) const override;
+                                               bool fromCache = false,
+                                               bool ignoreFM = false) const override;
 
     DeviceVector getOutputDevicesForStream(audio_stream_type_t stream,
                                            bool fromCache = false) const override;
@@ -95,6 +96,9 @@ public:
         return EngineBase::getProductStrategyByName(name);
     }
 
+    void setIsUseAudioWhaleHal(bool enable) { useAudioWhaleHal = enable; }
+    bool isUseAudioWhaleHal() const { return useAudioWhaleHal; }
+
 private:
     /* Copy facilities are put private to disable copy. */
     Engine(const Engine &object);
@@ -123,7 +127,7 @@ private:
 
     status_t loadAudioPolicyEngineConfig();
 
-    DeviceVector getDevicesForProductStrategy(product_strategy_t strategy) const;
+    DeviceVector getDevicesForProductStrategy(product_strategy_t strategy, bool ignoreFM = false) const;
 
     /**
      * Policy Parameter Manager hidden through a wrapper.
@@ -131,6 +135,8 @@ private:
     ParameterManagerWrapper *mPolicyParameterMgr;
 
     DeviceStrategyMap mDevicesForStrategies;
+
+    bool useAudioWhaleHal;
 };
 
 } // namespace audio_policy

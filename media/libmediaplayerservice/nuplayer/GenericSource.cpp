@@ -70,6 +70,7 @@ NuPlayer::GenericSource::GenericSource(
       mFetchTimedTextDataGeneration(0),
       mDurationUs(-1LL),
       mAudioIsVorbis(false),
+      mRequireDrm(false),
       mIsSecure(false),
       mIsStreaming(false),
       mUIDValid(uidValid),
@@ -77,7 +78,8 @@ NuPlayer::GenericSource::GenericSource(
       mMediaClock(mediaClock),
       mFd(-1),
       mBitrate(-1LL),
-      mPendingReadBufferTypes(0) {
+      mPendingReadBufferTypes(0),
+      mNeedConsume(true) {
     ALOGV("GenericSource");
     CHECK(mediaClock != NULL);
 
@@ -107,6 +109,9 @@ void NuPlayer::GenericSource::resetDataSource() {
     mStarted = false;
     mPreparing = false;
 
+    setDrmPlaybackStatusIfNeeded(Playback::STOP, 0);
+    mDecryptHandle = NULL;
+    mDrmManagerClient = NULL;
     mIsDrmProtected = false;
     mIsDrmReleased = false;
     mIsSecure = false;
@@ -186,6 +191,9 @@ status_t NuPlayer::GenericSource::initFromDataSource() {
         return UNKNOWN_ERROR;
     }
 
+    if (mRequireDrm) {
+        checkDrmStatus(mDataSource);
+    }
     sp<MetaData> fileMeta = extractor->getMetaData();
 
     size_t numtracks = extractor->countTracks();
@@ -328,6 +336,20 @@ status_t NuPlayer::GenericSource::startSources() {
     return OK;
 }
 
+void NuPlayer::GenericSource::checkDrmStatus(const sp<DataSource>& dataSource) {
+    dataSource->getDrmInfo(mDecryptHandle, &mDrmManagerClient);
+    if (mDecryptHandle != NULL) {
+        if(mNeedConsume) {
+            CHECK(mDrmManagerClient);
+            if (RightsStatus::RIGHTS_VALID != mDecryptHandle->status) {
+                sp<AMessage> msg = dupNotify();
+                msg->setInt32("what", kWhatDrmNoLicense);
+                msg->post();
+            }
+        }
+    }
+}
+
 int64_t NuPlayer::GenericSource::getLastReadPosition() {
     if (mAudioTrack.mSource != NULL) {
         return mAudioTimeUs;
@@ -336,6 +358,11 @@ int64_t NuPlayer::GenericSource::getLastReadPosition() {
     } else {
         return 0;
     }
+}
+
+void NuPlayer::GenericSource::setNeedConsume(bool /*needConsume*/)
+{
+   //mNeedConsume = needConsume;
 }
 
 bool NuPlayer::GenericSource::isStreaming() const {
@@ -410,8 +437,9 @@ void NuPlayer::GenericSource::onPrepareAsync() {
                 mDataSource = dataSource;
             }
         } else {
+            mRequireDrm = FileSource::requiresDrm(mFd, mOffset, mLength, nullptr /* mime */);
             if (property_get_bool("media.stagefright.extractremote", true) &&
-                    !FileSource::requiresDrm(mFd, mOffset, mLength, nullptr /* mime */)) {
+                    !mRequireDrm) {
                 sp<IBinder> binder =
                         defaultServiceManager()->getService(String16("media.extractor"));
                 if (binder != nullptr) {
@@ -487,6 +515,7 @@ void NuPlayer::GenericSource::onPrepareAsync() {
     notifyFlagsChanged(
             // FLAG_SECURE will be known if/when prepareDrm is called by the app
             // FLAG_PROTECTED will be known if/when prepareDrm is called by the app
+            (mDecryptHandle != NULL ? FLAG_PROTECTED : 0) |
             FLAG_CAN_PAUSE |
             FLAG_CAN_SEEK_BACKWARD |
             FLAG_CAN_SEEK_FORWARD |
@@ -530,6 +559,8 @@ void NuPlayer::GenericSource::notifyPreparedAndCleanup(status_t err) {
             Mutex::Autolock _l_d(mDisconnectLock);
             mDataSource.clear();
             mHttpSource.clear();
+            mDecryptHandle = NULL;
+            mDrmManagerClient = NULL;
         }
 
         mCachedSource.clear();
@@ -553,22 +584,32 @@ void NuPlayer::GenericSource::start() {
         postReadBuffer(MEDIA_TRACK_TYPE_VIDEO);
     }
 
+    setDrmPlaybackStatusIfNeeded(Playback::START, getLastReadPosition() / 1000);setDrmPlaybackStatusIfNeeded(Playback::START, getLastReadPosition() / 1000);
     mStarted = true;
 }
 
 void NuPlayer::GenericSource::stop() {
     Mutex::Autolock _l(mLock);
+    setDrmPlaybackStatusIfNeeded(Playback::STOP, 0);
     mStarted = false;
 }
 
 void NuPlayer::GenericSource::pause() {
     Mutex::Autolock _l(mLock);
+    setDrmPlaybackStatusIfNeeded(Playback::PAUSE, 0);
     mStarted = false;
 }
 
 void NuPlayer::GenericSource::resume() {
     Mutex::Autolock _l(mLock);
+    setDrmPlaybackStatusIfNeeded(Playback::START, getLastReadPosition() / 1000);
     mStarted = true;
+}
+
+void NuPlayer::GenericSource::complete() {
+   Mutex::Autolock _l(mLock);
+   setDrmPlaybackStatusIfNeeded(Playback::COMPLETE, 0);
+   mStarted = false;
 }
 
 void NuPlayer::GenericSource::disconnect() {
@@ -587,6 +628,14 @@ void NuPlayer::GenericSource::disconnect() {
         }
     } else if (httpSource != NULL) {
         static_cast<HTTPBase *>(httpSource.get())->disconnect();
+    }
+}
+
+void NuPlayer::GenericSource::setDrmPlaybackStatusIfNeeded(int playbackStatus, int64_t position) {
+    if (mDecryptHandle != NULL) {
+        if(mNeedConsume) {
+            mDrmManagerClient->setPlaybackStatus(mDecryptHandle, playbackStatus, position);
+        }
     }
 }
 
@@ -1188,6 +1237,11 @@ status_t NuPlayer::GenericSource::doSeek(int64_t seekTimeUs, MediaPlayerSeekMode
     if (mTimedTextTrack.mSource != NULL) {
         mTimedTextTrack.mPackets->clear();
         mFetchTimedTextDataGeneration++;
+    }
+
+    setDrmPlaybackStatusIfNeeded(Playback::START, seekTimeUs / 1000);
+    if (!mStarted) {
+      setDrmPlaybackStatusIfNeeded(Playback::PAUSE, 0);
     }
 
     ++mPollBufferingGeneration;

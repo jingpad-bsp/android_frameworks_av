@@ -63,6 +63,10 @@ static bool checkRecordingInternal(const String16& opPackageName, pid_t pid,
         uid_t uid, bool start) {
     // Okay to not track in app ops as audio server is us and if
     // device is rooted security model is considered compromised.
+    if (!strcmp("wifidisplay-sprd",String8(opPackageName).c_str())) {
+        ALOGD("Assign RECORD_AUDIO permission to wifidisplay");
+        return true;
+    }
     if (isAudioServerOrRootUid(uid)) return true;
 
     // We specify a pid and uid here as mediaserver (aka MediaRecorder or StageFrightRecorder)
@@ -124,7 +128,11 @@ void finishRecording(const String16& opPackageName, uid_t uid) {
     appOps.finishOp(op, uid, resolvedOpPackageName);
 }
 
-bool captureAudioOutputAllowed(pid_t pid, uid_t uid) {
+bool captureAudioOutputAllowed(const String16& opPackageName, pid_t pid, uid_t uid) {
+    if (!strcmp("wifidisplay-sprd",String8(opPackageName).c_str())) {
+        ALOGD("Assign CAPTURE_AUDIO_OUTPUT permission to wifidisplay");
+        return true;
+    }
     if (isAudioServerOrRootUid(uid)) return true;
     static const String16 sCaptureAudioOutput("android.permission.CAPTURE_AUDIO_OUTPUT");
     bool ok = PermissionCache::checkPermission(sCaptureAudioOutput, pid, uid);

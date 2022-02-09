@@ -37,7 +37,8 @@ SampleIterator::SampleIterator(SampleTable *table)
       mTTSSampleIndex(0),
       mTTSSampleTime(0),
       mTTSCount(0),
-      mTTSDuration(0) {
+      mTTSDuration(0),
+      mCurSimpleSizeIndex(0) {
     reset();
 }
 
@@ -49,6 +50,7 @@ void SampleIterator::reset() {
     mStopChunkSampleIndex = 0;
     mSamplesPerChunk = 0;
     mChunkDesc = 0;
+    mCurSimpleSizeIndex = 0;
 }
 
 status_t SampleIterator::seekTo(uint32_t sampleIndex) {
@@ -126,15 +128,28 @@ status_t SampleIterator::seekTo(uint32_t sampleIndex) {
         }
 
         mCurrentChunkIndex = chunk;
+        mCurSimpleSizeIndex = 0;
     }
 
     uint32_t chunkRelativeSampleIndex =
         (sampleIndex - mFirstChunkSampleIndex) % mSamplesPerChunk;
 
-    mCurrentSampleOffset = mCurrentChunkOffset;
-    for (uint32_t i = 0; i < chunkRelativeSampleIndex; ++i) {
-        mCurrentSampleOffset += mCurrentChunkSampleSizes[i];
+{
+    uint32_t i = 0;
+    if(mCurSimpleSizeIndex && (sampleIndex >= mCurrentSampleIndex)) {
+        for ( i = mCurSimpleSizeIndex; i < chunkRelativeSampleIndex; ++i) {
+            mCurrentSampleOffset += mCurrentChunkSampleSizes[i];
+        }
     }
+    else {
+        mCurrentSampleOffset = mCurrentChunkOffset;
+         for ( i = 0; i < chunkRelativeSampleIndex; ++i) {
+            mCurrentSampleOffset += mCurrentChunkSampleSizes[i];
+        }
+    }
+
+    mCurSimpleSizeIndex=i;
+}
 
     mCurrentSampleSize = mCurrentChunkSampleSizes[chunkRelativeSampleIndex];
     if (sampleIndex < mTTSSampleIndex) {

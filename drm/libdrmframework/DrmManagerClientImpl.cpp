@@ -53,8 +53,8 @@ const sp<IDrmManagerService>& DrmManagerClientImpl::getDrmManagerService() {
     Mutex::Autolock lock(sMutex);
     if (NULL == sDrmManagerService.get()) {
         char value[PROPERTY_VALUE_MAX];
-        if (property_get("drm.service.enabled", value, NULL) == 0) {
-            // Drm is undefined for this device
+        if (property_get("drm.service.enabled", value, NULL) == 0  || (!(strcmp(value, "false")) || !(strcmp(value, "disable")))) {
+            // Drm is undefined or false for this device
             return sDrmManagerService;
         }
 

@@ -44,6 +44,9 @@ LOCAL_MODULE:= libaudiopolicyservice
 
 LOCAL_CFLAGS += -fvisibility=hidden
 LOCAL_CFLAGS += -Wall -Werror
+ifeq ($(USE_CUSTOM_AUDIO_POLICY), 1)
+LOCAL_CFLAGS += -DSPRD_CUSTOM_AUDIO_POLICY
+endif
 
 include $(BUILD_SHARED_LIBRARY)
 

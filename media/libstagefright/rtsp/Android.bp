@@ -17,6 +17,7 @@ cc_defaults {
         "ARTSPConnection.cpp",
         "ASessionDescription.cpp",
         "SDPLoader.cpp",
+        "rtsp-ex/ARTSPConnectionEx.cpp",
     ],
 
     shared_libs: [
@@ -27,6 +28,7 @@ cc_defaults {
     include_dirs: [
         "frameworks/av/media/libstagefright",
         "frameworks/native/include/media/openmax",
+        "frameworks/av/media/libstagefright/rtsp/rtsp-ex",
     ],
 
     arch: {

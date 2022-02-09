@@ -84,6 +84,9 @@ enum output_format {
     /* Opus data in a OGG container */
     OUTPUT_FORMAT_OGG = 11,
 
+    /* sprd add: support mp3 recorder */
+    OUTPUT_FORMAT_MP3  = 12,
+
     OUTPUT_FORMAT_LIST_END // must be last - used to validate format type
 };
 
@@ -96,6 +99,8 @@ enum audio_encoder {
     AUDIO_ENCODER_AAC_ELD = 5,
     AUDIO_ENCODER_VORBIS = 6,
     AUDIO_ENCODER_OPUS = 7,
+    /* sprd add: support mp3 recorder */
+    AUDIO_ENCODER_MP3  = 8,
 
     AUDIO_ENCODER_LIST_END // must be the last - used to validate the audio encoder type
 };

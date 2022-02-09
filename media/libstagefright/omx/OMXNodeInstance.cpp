@@ -1837,7 +1837,14 @@ status_t OMXNodeInstance::storeFenceInMeta_l(
     } else if (fenceFd >= 0) {
         CLOG_BUFFER(storeFenceInMeta, "waiting for fence %d", fenceFd);
         sp<Fence> fence = new Fence(fenceFd);
-        return fence->wait(IOMX::kFenceTimeoutMs);
+        status_t res = fence->wait(IOMX::kFenceTimeoutMs);
+        if(res != OK)
+        {
+            ALOGI("fence wait timeout");
+            res = fence->wait(IOMX::kFenceTimeoutMs);
+            ALOGI("fence wait res %d", res);
+        }
+        return OK;
     }
     return OK;
 }
